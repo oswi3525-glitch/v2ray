@@ -214,6 +214,20 @@ function migrate() {
       db.exec('COMMIT');
     } catch (e) { db.exec('ROLLBACK'); throw e; }
   }
+  if (!applied.has(5)) {
+    db.exec('BEGIN');
+    try {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS experimental_clients (
+          user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+          uuid TEXT NOT NULL UNIQUE,
+          created_at TEXT NOT NULL
+        );
+      `);
+      db.prepare('INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)').run(5, now());
+      db.exec('COMMIT');
+    } catch (e) { db.exec('ROLLBACK'); throw e; }
+  }
   return applied;
 }
 migrate();
@@ -405,6 +419,51 @@ function metrics(limit = 60) {
   return db.prepare('SELECT * FROM server_metrics ORDER BY id DESC LIMIT ?').all(limit);
 }
 
+function getExperimentalClient(userId) {
+  return db.prepare('SELECT * FROM experimental_clients WHERE user_id=?').get(Number(userId));
+}
+function createExperimentalClient(userId, uuid) {
+  db.prepare('INSERT INTO experimental_clients (user_id, uuid, created_at) VALUES (?, ?, ?)').run(Number(userId), uuid, now());
+  return getExperimentalClient(userId);
+}
+function getOrCreateExperimentalUuid(userId) {
+  let c = getExperimentalClient(userId);
+  if (c) return c.uuid;
+  const u = crypto.randomUUID();
+  createExperimentalClient(userId, u);
+  return u;
+}
+const DEFAULT_EXPERIMENTAL_CONFIG = {
+  enabled: false,
+  server_address: '',
+  server_port: 443,
+  protocol: 'vless',
+  network: 'ws',
+  tls_mode: 'tls',
+  sni: '',
+  host: '',
+  ws_path: '/vpn',
+  uuid_mode: 'per_user'
+};
+function getExperimentalConfig() {
+  const raw = getSetting('experimental_config', null);
+  let cfg = { ...DEFAULT_EXPERIMENTAL_CONFIG };
+  if (raw) { try { cfg = { ...cfg, ...JSON.parse(raw) }; } catch {} }
+  return cfg;
+}
+function setExperimentalConfig(patch) {
+  const cur = getExperimentalConfig();
+  const next = { ...cur, ...patch };
+  setSetting('experimental_config', JSON.stringify(next));
+  audit('admin', 'experimental_config_updated', 'experimental', Object.keys(patch).join(','));
+  return next;
+}
+function getExperimentalEnabled() { return getExperimentalConfig().enabled === true; }
+
+function listExperimentalClients() {
+  return db.prepare(`SELECT u.id, u.username, u.display_name, e.uuid FROM experimental_clients e JOIN users u ON u.id=e.user_id WHERE u.revoked_at IS NULL`).all();
+}
+
 function activeVpnUsers() {
   return db.prepare(`SELECT u.id, u.username, u.exhausted, u.enabled, u.quota_bytes, u.used_upload, u.used_download,
     c.uuid, s.token, s.path FROM users u JOIN vpn_clients c ON c.user_id=u.id JOIN subscriptions s ON s.user_id=u.id
@@ -510,8 +569,9 @@ module.exports = {
   friendCount, listUsers, getUser, getUserByUsername, getUserByToken, getVpnClient, getSubscription,
   createFriend, setFriendPassword, changeQuota, setUserState, revokeFriend,
   recordTraffic, trafficHistory, openSession, getSession, deleteSession, purgeSessions,
-  addMetric, metrics, activeVpnUsers, auditLogs,
+  addMetric, metrics, activeVpnUsers, listExperimentalClients, auditLogs,
   validDeviceId, upsertDevice, getDevice, touchDevice, addDeviceTraffic, setDeviceName, listDevices, adminDevices,
+  getExperimentalClient, createExperimentalClient, getOrCreateExperimentalUuid, getExperimentalConfig, setExperimentalConfig, getExperimentalEnabled, DEFAULT_EXPERIMENTAL_CONFIG,
   addSpeedTest, speedTests, adminSpeedTests, purgeSpeedTests, securityEvent, securityEvents,
   notify, notifications, unreadCount, markNotificationsRead, purgeNotifications
 };

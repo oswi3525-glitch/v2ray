@@ -3,6 +3,7 @@ const root = document.getElementById('app');
 const toastEl = document.getElementById('toast');
 let me = null;
 let importCache = null;
+let importCacheExp = null;
 let panelCleanup = null;
 
 function toast(msg) {
@@ -473,11 +474,48 @@ async function friendView() {
       }) };
   }
 
+  async function experimental() {
+    try { importCacheExp = await api('/api/friend/import/experimental'); } catch (e) { importCacheExp = { ok: false, error: e.message }; }
+    const i = importCacheExp || {};
+    const ready = i.ok && i.ready;
+    const cfg = i.config || {};
+    return { html: `<div class="card"><h2>TikTunnel - Experimental</h2>
+      <span class="pill warn">Testing</span>
+      <p class="sub">Nhánh thử nghiệm SNI/Host/TLS/WS/VLESS. Main không bị thay đổi.</p>
+      ${i.ok ? `<div class="pill ${ready ? 'ok' : 'warn'}">${ready ? 'Sẵn sàng' : 'Chưa sẵn sàng'}</div>
+      <p class="sub">Server: ${esc(cfg.server_address || '—')}:${esc(cfg.server_port || '—')} · Protocol ${esc(cfg.protocol)} · Network ${esc(cfg.network)} · TLS ${esc(cfg.tls_mode)}</p>
+      <p class="sub">SNI: ${esc(cfg.sni || '—')} · Host: ${esc(cfg.host || '—')} · WS path: ${esc(cfg.ws_path || '—')}</p>
+      <div class="row"><button id="exp-tap" ${ready ? '' : 'disabled'}>Add Experimental to Shadowrocket</button>
+      <button class="ghost" id="exp-node" ${ready ? '' : 'disabled'}>Thêm 1 node Experimental</button></div>
+      <div class="row"><button class="ghost" id="copy-exp-uri">Copy Experimental URI</button>
+      <button class="ghost" id="exp-analyze">Run Experimental Analyzer</button></div>
+      <details class="adv"><summary>Xem cấu hình Experimental</summary><p class="mono">${esc(i.uri || '')}</p></details>
+      <div id="exp-analyze-result"></div>`
+      : `<div class="empty"><b>Experimental chưa bật hoặc lỗi</b><p class="sub">${esc(i.error || 'Admin cần bật nhánh Experimental')}</p></div>`}
+      </div>`, after: () => {
+        if (!i.ok) return;
+        const tap = (link) => { if (!ready) { toast('Experimental chưa sẵn sàng'); return; } openDeepLink(link); toast('Đang mở Shadowrocket (Experimental)'); };
+        const btn = document.getElementById('exp-tap'); if (btn) btn.onclick = () => tap(i.links.subscription);
+        const node = document.getElementById('exp-node'); if (node) node.onclick = () => tap(i.links.node);
+        const copyBtn = document.getElementById('copy-exp-uri'); if (copyBtn) copyBtn.onclick = () => copy(i.uri);
+        const an = document.getElementById('exp-analyze'); if (an) an.onclick = async () => {
+          const box = document.getElementById('exp-analyze-result'); box.innerHTML = '<div class="spinner"></div>';
+          try {
+            const d = await api('/api/experimental/analyze');
+            const rows = (d.results || []).map(c => `<div class="diag-item"><div class="diag-head">${diagPill(c.status)}<b>${esc(c.label)}</b></div><p>${esc(c.detail)}</p></div>`).join('');
+            box.innerHTML = `<div class="live-grid"><div class="live-item"><span>PASS</span><b>${d.summary?.pass||0}</b></div>
+              <div class="live-item"><span>FAIL</span><b>${d.summary?.fail||0}</b></div>
+              <div class="live-item"><span>WARNING</span><b>${d.summary?.warning||0}</b></div></div><div class="diag-list">${rows}</div>`;
+          } catch (e) { box.innerHTML = errorState(e.message); }
+        };
+      } };
+  }
+
   async function shadowrocket() {
     try { importCache = await api(`/api/friend/import?device=${dev}`); } catch (e) { importCache = { ok: false, error: e.message }; }
     const i = importCache;
     const ready = i.ok && i.ready;
-    return { html: `<div class="card"><h2>Add to Shadowrocket</h2>
+    return { html: `<div class="card"><h2>Add to Shadowrocket <span class="pill ok">Stable</span></h2>
       ${i.ok ? `<div class="pill ${ready ? 'ok' : 'warn'}">${ready ? 'Sẵn sàng' : 'Server chưa sẵn sàng'}</div>
       <p class="sub">Session đã xác thực · quota ${gb(i.remaining_bytes)} còn lại · server ${i.server_ready ? 'đang chạy' : 'không chạy'}.</p>
       <div class="row"><button id="one-tap" ${ready ? '' : 'disabled'}>Add to Shadowrocket</button>
@@ -518,7 +556,7 @@ async function friendView() {
   }
 
   const friendBuilders = { 'Overview': overview, 'Data Usage': dataUsage, 'Network Test': networkTest,
-    'Diagnostics': diagnosticsTab, 'Devices': devices, 'Shadowrocket': shadowrocket, 'Settings': settings };
+    'Diagnostics': diagnosticsTab, 'Devices': devices, 'Shadowrocket': shadowrocket, 'Experimental': experimental, 'Settings': settings };
   mount('Account', friendBuilders, 'Overview');
 }
 
@@ -629,6 +667,55 @@ async function adminView() {
       ${s.events.map(e => `<tr><td class="mono">${esc(e.ts.slice(5, 19))}</td><td>${esc(e.actor)}</td><td>${esc(e.action)}</td><td>${esc(e.target)}</td><td class="mono">${esc(e.ip)}</td></tr>`).join('')}</tbody></table></div>`
       : emptyState('Chưa có sự kiện bảo mật')}</div>` };
   }
+  async function experimentalAdmin() {
+    let d;
+    try { d = await api('/api/admin/experimental'); } catch (e) { d = { ok: false, error: e.message }; }
+    const c = d.config || {};
+    return { html: `<div class="card"><h2>Experimental Branch <span class="pill warn">Testing</span></h2>
+      <p class="sub">Cấu hình riêng cho nhánh thử nghiệm. Main không bị thay đổi.</p>
+      ${d.ok ? `<form id="exp-form">
+        <label><input type="checkbox" id="exp-enabled" ${c.enabled ? 'checked' : ''}> Bật Experimental</label>
+        <div class="row"><div style="flex:1"><label>Server Address</label><input id="exp-addr" value="${esc(c.server_address || '')}"></div>
+        <div style="flex:1"><label>Server Port</label><input id="exp-port" type="number" value="${esc(c.server_port || 443)}"></div></div>
+        <div class="row"><div style="flex:1"><label>Protocol</label><select id="exp-proto"><option value="vless" ${c.protocol==='vless'?'selected':''}>VLESS</option><option value="vmess" ${c.protocol==='vmess'?'selected':''}>VMess</option></select></div>
+        <div style="flex:1"><label>Network</label><select id="exp-net"><option value="ws" ${c.network==='ws'?'selected':''}>WebSocket</option><option value="tcp" ${c.network==='tcp'?'selected':''}>TCP</option></select></div>
+        <div style="flex:1"><label>TLS Mode</label><select id="exp-tls"><option value="tls" ${c.tls_mode==='tls'?'selected':''}>TLS</option><option value="none" ${c.tls_mode==='none'?'selected':''}>None</option></select></div></div>
+        <div class="row"><div style="flex:1"><label>SNI</label><input id="exp-sni" value="${esc(c.sni || '')}"></div>
+        <div style="flex:1"><label>Host Header</label><input id="exp-host" value="${esc(c.host || '')}"></div></div>
+        <label>WebSocket Path</label><input id="exp-path" value="${esc(c.ws_path || '/vpn')}">
+        <label>UUID mode</label><select id="exp-uuidmode"><option value="per_user" ${c.uuid_mode==='per_user'?'selected':''}>Per user</option><option value="shared" ${c.uuid_mode==='shared'?'selected':''}>Shared</option></select>
+        <label>Shared UUID (if shared)</label><input id="exp-uuid" value="${esc(c.uuid || '')}">
+        <div class="row" style="margin-top:12px"><button type="submit">Lưu Experimental</button><button type="button" class="ghost" id="exp-rollback">Rollback</button></div>
+      </form>` : errorState(d.error)}`,
+      after: () => {
+        if (!d.ok) return;
+        const form = document.getElementById('exp-form');
+        if (form) form.onsubmit = async (e) => {
+          e.preventDefault();
+          try {
+            await api('/api/admin/experimental', { method: 'POST', body: JSON.stringify({
+              enabled: document.getElementById('exp-enabled').checked,
+              server_address: document.getElementById('exp-addr').value.trim(),
+              server_port: Number(document.getElementById('exp-port').value),
+              protocol: document.getElementById('exp-proto').value,
+              network: document.getElementById('exp-net').value,
+              tls_mode: document.getElementById('exp-tls').value,
+              sni: document.getElementById('exp-sni').value.trim(),
+              host: document.getElementById('exp-host').value.trim(),
+              ws_path: document.getElementById('exp-path').value.trim(),
+              uuid_mode: document.getElementById('exp-uuidmode').value,
+              uuid: document.getElementById('exp-uuid').value.trim()
+            }) });
+            toast('Đã lưu Experimental'); mount('Admin', adminBuilders, 'Experimental');
+          } catch (err) { toast(err.message); }
+        };
+        const rb = document.getElementById('exp-rollback'); if (rb) rb.onclick = async () => {
+          try { await api('/api/admin/experimental/rollback', { method: 'POST', body: '{}' }); toast('Đã rollback'); mount('Admin', adminBuilders, 'Experimental'); }
+          catch (e) { toast(e.message); }
+        };
+      } };
+  }
+
   async function settings() {
     return { html: `<div class="card"><h2>Settings</h2><form id="adminpw"><label>Đổi mật khẩu admin</label>
       <input id="apw" type="password" minlength="8" required><button style="margin-top:12px" type="submit">Cập nhật</button></form>
@@ -640,7 +727,7 @@ async function adminView() {
       } };
   }
   const adminBuilders = { 'Overview': overview, 'Users': users, 'Quota': quota, 'Devices': devices,
-    'Monitoring': monitoring, 'Network': network, 'Diagnostics': diagnosticsTab, 'Security': security, 'Settings': settings };
+    'Monitoring': monitoring, 'Network': network, 'Diagnostics': diagnosticsTab, 'Security': security, 'Experimental': experimentalAdmin, 'Settings': settings };
   mount('Admin', adminBuilders, 'Overview');
 }
 

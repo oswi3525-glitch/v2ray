@@ -114,6 +114,8 @@ function publicUser(u) {
     last_connection: u?.last_connection, last_seen: u?.last_seen,
     uuid: v?.uuid || null, subscription_token: s?.token || null, subscription_path: s?.path || null,
     vless_uri: u ? vlessUri(u) : null,
+    experimental_vless_uri: u ? experimentalUri(u) : null,
+    experimental_enabled: experimentalEnabled(),
     password_set: !!u?.password_hash
   };
 }
@@ -161,6 +163,45 @@ function vlessUri(u, deviceId = null) {
   return `vless://${v.uuid}@${control.public_https_host}:443?${q}#${name}`;
 }
 
+
+function experimentalConfig() { return cdb.getExperimentalConfig(); }
+function experimentalEnabled() { return experimentalConfig().enabled === true; }
+function experimentalUri(u, deviceId = null) {
+  const cfg = experimentalConfig();
+  if (!cfg.enabled) return null;
+  const v = cdb.getVpnClient(u.id);
+  if (!v) return null;
+  const uuid = cfg.uuid_mode === 'shared'
+    ? (cfg.uuid || v.uuid)
+    : cdb.getOrCreateExperimentalUuid(u.id);
+  if (!uuid) return null;
+  const name = encodeURIComponent((u.display_name || u.username) + ' Experimental');
+  const address = cfg.server_address || control.publicTcpHost;
+  const port = Number(cfg.server_port || control.publicTcpPort);
+  const sni = cfg.sni || address;
+  const host = cfg.host || address;
+  const pathValue = (cfg.ws_path || '/vpn') + (cdb.validDeviceId(deviceId) ? `.${deviceId}` : '');
+  if (cfg.protocol === 'vmess') {
+    const obj = {
+      v: '2', ps: (u.display_name || u.username) + ' Experimental', add: address, port: String(port),
+      id: uuid, aid: '0', scy: 'auto', net: cfg.network || 'ws', type: 'none',
+      host: host, path: pathValue, tls: cfg.tls_mode === 'tls' ? 'tls' : '',
+      sni: sni
+    };
+    return 'vmess://' + Buffer.from(JSON.stringify(obj)).toString('base64');
+  }
+  if (cfg.network === 'ws') {
+    const security = cfg.tls_mode === 'tls' ? 'tls' : 'none';
+    const q = [
+      'encryption=none', 'type=ws',
+      `path=${encodeURIComponent(pathValue)}`,
+      `host=${host}`, `security=${security}`, `sni=${sni}`
+    ].join('&');
+    return `vless://${uuid}@${address}:${port}?${q}#${name}`;
+  }
+  const security = cfg.tls_mode === 'tls' ? 'tls' : 'none';
+  return `vless://${uuid}@${address}:${port}?encryption=none&type=tcp&security=${security}&sni=${sni}#${name}`;
+}
 let applyChain = Promise.resolve();
 function applyConfig() {
   applyChain = applyChain.then(() => new Promise((resolve, reject) => {
@@ -456,9 +497,10 @@ app.get('/api/friend/usage', async (req, reply) => {
 });
 app.get('/api/friend/vpn', async (req, reply) => {
   const a = guard(req, reply, 'friend'); if (!a) return;
-  return reply.send({     ok: true, uri: vlessUri(a.user, req.query.device), mode: control.publicTransport, active: cdb.activeVpnUsers().some((u) => u.id === a.user.id) });
+  return reply.send({     ok: true, uri: vlessUri(a.user, req.query.device), experimental_uri: experimentalUri(a.user, req.query.device), experimental_enabled: experimentalEnabled(), mode: control.publicTransport, active: cdb.activeVpnUsers().some((u) => u.id === a.user.id) });
 });
 app.get('/api/friend/import', async (req, reply) => {
+  if (req.query && req.query.branch === 'experimental') return experimentalImportHandler(req, reply);
   const a = guard(req, reply, 'friend'); if (!a) return;
   const u = cdb.getUser(a.user.id) || a.user;
   const deviceId = cdb.validDeviceId(req.query.device) ? req.query.device : null;
@@ -493,6 +535,238 @@ app.get('/api/friend/import', async (req, reply) => {
     note: 'Chỉ coi là thành công sau khi bạn xác nhận thêm server trong Shadowrocket.'
   });
 });
+app.get('/api/friend/experimental', async (req, reply) => {
+  const a = guard(req, reply, 'friend'); if (!a) return;
+  const u = cdb.getUser(a.user.id) || a.user;
+  return reply.send({ ok: true, uri: experimentalUri(u, req.query.device), enabled: experimentalEnabled(),
+    config: experimentalConfig(), mode: experimentalConfig().network || 'ws' });
+});
+app.get('/api/experimental/status', async (req, reply) => {
+  const s = sessionFor(req);
+  if (!s) return reply.code(401).send({ ok: false, error: 'unauthorized' });
+  return reply.send({ ok: true, enabled: experimentalEnabled(), config: experimentalConfig() });
+});
+function experimentalImportHandler(req, reply) {
+  const a = guard(req, reply, 'friend'); if (!a) return;
+  const u = cdb.getUser(a.user.id) || a.user;
+  const deviceId = cdb.validDeviceId(req.query.device) ? req.query.device : null;
+  if (!accountReady(u)) {
+    cdb.securityEvent('friend', 'experimental_import_denied', String(u.id), req.ip, 'account_not_ready');
+    return reply.code(403).send({ ok: false, error: 'account_not_ready' });
+  }
+  const cfg = experimentalConfig();
+  if (!cfg.enabled) return reply.code(409).send({ ok: false, error: 'experimental_disabled' });
+  const uri = experimentalUri(u, deviceId);
+  if (!uri) return reply.code(409).send({ ok: false, error: 'experimental_config_not_ready' });
+  // validate URI
+  if (!/^vless:\/\/|^vmess:\/\//.test(uri)) return reply.code(400).send({ ok: false, error: 'invalid_uri' });
+  const s = cdb.getSubscription(u.id);
+  const origin = cfg.server_address ? `http://${cfg.server_address}:${cfg.server_port}` : (control.public_https_host ? `https://${control.public_https_host}` : `${req.protocol}://${req.headers.host}`);
+  const subUrl = `${origin}/api/experimental/sub/${s.token}${deviceId ? `?device=${deviceId}` : ''}`;
+  const remark = ((u.display_name || u.username) + ' Experimental').replace(/[^\p{L}\p{N} ._-]/gu, '').slice(0, 40);
+  const serverReady = true;
+  cdb.securityEvent('friend', 'experimental_import_link_issued', String(u.id), req.ip, `branch=experimental`);
+  return reply.header('Cache-Control', 'no-store').send({
+    ok: true, branch: 'experimental',
+    server_ready: serverReady, account_ready: true, ready: true,
+    remaining_bytes: Math.max(0, (u.quota_bytes || 0) - (u.used_upload || 0) - (u.used_download || 0)),
+    uri, subscription_url: subUrl,
+    links: { node: `shadowrocket://add/${uri}`, subscription: `sub://${Buffer.from(subUrl, 'utf8').toString('base64')}#${encodeURIComponent(remark)}` },
+    fallback: { copy_uri: true, open_url: subUrl, file_url: `/api/friend/export?branch=experimental${deviceId ? `&device=${deviceId}` : ''}` },
+    note: 'Experimental branch. Main config unchanged.'
+  });
+}
+app.get('/api/friend/import/experimental', experimentalImportHandler);
+app.get('/api/experimental/import', experimentalImportHandler);
+app.get('/api/friend/experimental/import', experimentalImportHandler);
+app.get('/api/experimental/import/friend', experimentalImportHandler);
+// alias with query
+app.get('/api/experimental/import/:unused', experimentalImportHandler);
+
+app.get('/api/experimental/sub/:token', async (req, reply) => {
+  const u = cdb.getUserByToken(req.params.token);
+  if (!u || !accountReady(u)) return reply.code(404).send({ ok: false, error: 'not_found' });
+  const uri = experimentalUri(u, req.query.device);
+  if (!uri) return reply.code(404).send({ ok: false, error: 'not_found' });
+  reply.header('Cache-Control', 'no-store');
+  reply.type('text/plain; charset=utf-8');
+  return reply.send(req.query.raw === '1' ? uri + '\n' : Buffer.from(uri + '\n').toString('base64'));
+});
+app.get('/api/experimental/export', async (req, reply) => {
+  const a = guard(req, reply, 'friend'); if (!a) return;
+  const u = cdb.getUser(a.user.id) || a.user;
+  const uri = experimentalUri(u, req.query.device);
+  if (!uri) return reply.code(404).send({ ok: false, error: 'not_found' });
+  const name = String(u.username || 'tiktunnel').replace(/[^A-Za-z0-9_.-]/g, '_').slice(0, 40);
+  reply.header('Content-Disposition', `attachment; filename="tiktunnel-experimental-${name}.txt"`);
+  reply.header('Cache-Control', 'no-store');
+  reply.type('text/plain; charset=utf-8');
+  return reply.send(uri + '\n');
+});
+
+// Admin experimental config endpoints
+app.get('/api/admin/experimental', async (req, reply) => {
+  if (!guard(req, reply, 'admin')) return;
+  return reply.send({ ok: true, enabled: experimentalEnabled(), config: experimentalConfig() });
+});
+app.post('/api/admin/experimental', async (req, reply) => {
+  const a = guard(req, reply, 'admin'); if (!a || !csrfOk(req, a)) return reply.code(401).send({ ok: false, error: 'unauthorized' });
+  const b = req.body || {};
+  const patch = {};
+  if (b.enabled !== undefined) patch.enabled = !!b.enabled;
+  if (b.server_address !== undefined) patch.server_address = String(b.server_address).trim().slice(0, 255);
+  if (b.server_port !== undefined) { const p=Number(b.server_port); if (Number.isFinite(p)&&p>0&&p<65536) patch.server_port=p; }
+  if (b.protocol !== undefined && ['vless','vmess'].includes(b.protocol)) patch.protocol = b.protocol;
+  if (b.network !== undefined && ['ws','tcp'].includes(b.network)) patch.network = b.network;
+  if (b.tls_mode !== undefined && ['tls','none'].includes(b.tls_mode)) patch.tls_mode = b.tls_mode;
+  if (b.sni !== undefined) patch.sni = String(b.sni).trim().slice(0, 255);
+  if (b.host !== undefined) patch.host = String(b.host).trim().slice(0, 255);
+  if (b.ws_path !== undefined) patch.ws_path = String(b.ws_path).trim().slice(0, 255) || '/vpn';
+  if (b.uuid !== undefined && /^[0-9a-f-]{36}$/i.test(b.uuid)) patch.uuid = b.uuid;
+  if (b.uuid_mode !== undefined && ['per_user','shared'].includes(b.uuid_mode)) patch.uuid_mode = b.uuid_mode;
+  // rollback backup
+  try {
+    const fs = require('node:fs'); const path = require('node:path');
+    const ROOT = cdb.ROOT;
+    const backupDir = path.join(ROOT, 'backups');
+    fs.mkdirSync(backupDir, { recursive: true });
+    fs.writeFileSync(path.join(backupDir, 'experimental-config.last.json'), JSON.stringify(experimentalConfig(), null, 2));
+  } catch {}
+  const next = cdb.setExperimentalConfig(patch);
+  return reply.send({ ok: true, enabled: next.enabled === true, config: next });
+});
+app.post('/api/admin/experimental/rollback', async (req, reply) => {
+  const a = guard(req, reply, 'admin'); if (!a || !csrfOk(req, a)) return reply.code(401).send({ ok: false, error: 'unauthorized' });
+  try {
+    const fs = require('node:fs'); const path = require('node:path');
+    const ROOT = cdb.ROOT;
+    const f = path.join(ROOT, 'backups', 'experimental-config.last.json');
+    if (fs.existsSync(f)) {
+      const prev = JSON.parse(fs.readFileSync(f, 'utf8'));
+      cdb.setSetting('experimental_config', JSON.stringify(prev));
+    } else {
+      cdb.setSetting('experimental_config', JSON.stringify(cdb.DEFAULT_EXPERIMENTAL_CONFIG || {}));
+    }
+  } catch (e) { return reply.code(500).send({ ok: false, error: 'rollback_failed' }); }
+  return reply.send({ ok: true, enabled: experimentalEnabled(), config: experimentalConfig() });
+});
+
+// Experimental analyzer (server-side real probes)
+app.get('/api/experimental/analyze', async (req, reply) => {
+  const s = sessionFor(req);
+  if (!s) return reply.code(401).send({ ok: false, error: 'unauthorized' });
+  const cfg = experimentalConfig();
+  if (!cfg.enabled) return reply.send({ ok: true, enabled: false, results: [] });
+  const host = cfg.server_address || control.publicTcpHost;
+  const port = Number(cfg.server_port || control.publicTcpPort);
+  const out = [];
+  // DNS
+  try {
+    const dns = require('node:dns');
+    const r = await new Promise((res, rej) => dns.lookup(host, (e, a) => e ? rej(e) : res(a)));
+    out.push({ id: 'dns', label: 'DNS resolution', status: 'PASS', detail: r });
+  } catch (e) { out.push({ id: 'dns', label: 'DNS resolution', status: 'FAIL', detail: String(e.message) }); }
+  // TCP
+  let tcpOk = false, tcpMs = null;
+  try {
+    const t = Date.now();
+    await new Promise((res, rej) => {
+      const sock = require('node:net').connect(port, host);
+      sock.setTimeout(3000);
+      sock.on('connect', () => { tcpMs = Date.now()-t; sock.destroy(); res(); });
+      sock.on('error', rej);
+      sock.on('timeout', () => { sock.destroy(); rej(new Error('timeout')); });
+    });
+    tcpOk = true;
+    out.push({ id: 'tcp', label: 'TCP connectivity', status: 'PASS', detail: `${tcpMs} ms` });
+  } catch (e) { out.push({ id: 'tcp', label: 'TCP connectivity', status: 'FAIL', detail: String(e.message) }); }
+  // TLS
+  if (cfg.tls_mode === 'tls') {
+    try {
+      const tls = require('node:tls');
+      const t = Date.now();
+      await new Promise((res, rej) => {
+        const sock = tls.connect({ host, port, servername: cfg.sni || host, rejectUnauthorized: true }, () => {
+          const cert = sock.getPeerCertificate();
+          out.push({ id: 'tls', label: 'TLS handshake', status: 'PASS', detail: `${Date.now()-t} ms` });
+          out.push({ id: 'certificate', label: 'Certificate validation', status: cert && cert.subject ? 'PASS' : 'FAIL', detail: `CN=${cert?.subject?.CN || ''}, issuer=${cert?.issuer?.CN || ''}, valid_to=${cert?.valid_to || ''}` });
+          sock.destroy(); res();
+        });
+        sock.setTimeout(5000);
+        sock.on('error', (e) => { out.push({ id: 'tls', label: 'TLS handshake', status: 'FAIL', detail: String(e.message) }); rej(e); });
+        sock.on('timeout', () => { sock.destroy(); out.push({ id: 'tls', label: 'TLS handshake', status: 'FAIL', detail: 'timeout' }); rej(new Error('timeout')); });
+      });
+    } catch {}
+  } else {
+    out.push({ id: 'tls', label: 'TLS handshake', status: 'WARNING', detail: 'TLS disabled (none mode)' });
+  }
+  // SNI/Host info
+  out.push({ id: 'sni', label: 'SNI configured', status: cfg.sni ? 'PASS' : 'WARNING', detail: cfg.sni || '(none)' });
+  out.push({ id: 'host', label: 'Host header configured', status: cfg.host ? 'PASS' : 'WARNING', detail: cfg.host || '(none)' });
+  // WebSocket handshake (best-effort HTTP upgrade)
+  if (cfg.network === 'ws' && tcpOk) {
+    try {
+      const http = require('node:http');
+      const wsKey = require('node:crypto').randomBytes(16).toString('base64');
+      const pathValue = cfg.ws_path || '/vpn';
+      const res = await new Promise((resolve, reject) => {
+        const req = http.request({ host, port, path: pathValue, method: 'GET',
+          headers: { 'Connection': 'Upgrade', 'Upgrade': 'websocket', 'Sec-WebSocket-Key': wsKey, 'Sec-WebSocket-Version': '13', 'Host': cfg.host || host } }, (r) => resolve(r));
+        if (cfg.tls_mode === 'tls') { /* skip for plain */ }
+        req.on('error', reject);
+        req.setTimeout(5000, () => { req.destroy(); reject(new Error('timeout')); });
+        req.end();
+      });
+      const status = res.statusCode;
+      out.push({ id: 'ws', label: 'WebSocket handshake', status: status === 101 ? 'PASS' : 'WARNING', detail: `HTTP ${status}` });
+    } catch (e) { out.push({ id: 'ws', label: 'WebSocket handshake', status: 'FAIL', detail: String(e.message) }); }
+  }
+  // repeated TCP probes for packet loss / latency
+  const probeMs = [];
+  let lost = 0;
+  for (let i = 0; i < 6; i++) {
+    try {
+      const t = Date.now();
+      await new Promise((res, rej) => {
+        const sock = require('node:net').connect(port, host);
+        sock.setTimeout(2000);
+        sock.on('connect', () => { probeMs.push(Date.now() - t); sock.destroy(); res(); });
+        sock.on('error', rej);
+        sock.on('timeout', () => { sock.destroy(); rej(new Error('timeout')); });
+      });
+    } catch (e) { lost++; }
+  }
+  const avgProbe = probeMs.length ? probeMs.reduce((a,b)=>a+b,0)/probeMs.length : 0;
+  const lossPct = (lost / 6) * 100;
+  out.push({ id: 'ping', label: 'Ping/TCP latency', status: tcpOk ? 'PASS' : 'FAIL', detail: tcpOk ? `avg ${avgProbe.toFixed(1)} ms` : 'unreachable' });
+  out.push({ id: 'packet_loss', label: 'Packet loss', status: lossPct === 0 ? 'PASS' : (lossPct < 50 ? 'WARNING' : 'FAIL'), detail: `${lossPct.toFixed(1)} % (${lost}/6)` });
+  // HTTP Host header probe
+  try {
+    const mod = cfg.tls_mode === 'tls' ? require('node:https') : require('node:http');
+    const t = Date.now();
+    const r = await new Promise((res, rej) => {
+      const rq = mod.request({ host, port, path: '/', method: 'GET', servername: cfg.sni || host,
+        headers: { Host: cfg.host || host }, rejectUnauthorized: cfg.tls_mode === 'tls' }, (resp) => {
+        let bytes = 0;
+        resp.on('data', (c) => { bytes += c.length; });
+        resp.on('end', () => res({ status: resp.statusCode, bytes, ms: Date.now() - t }));
+      });
+      rq.on('error', rej);
+      rq.setTimeout(5000, () => { rq.destroy(); rej(new Error('timeout')); });
+      rq.end();
+    });
+    out.push({ id: 'http_host', label: 'HTTP Host Header', status: r.status < 500 ? 'PASS' : 'WARNING', detail: `HTTP ${r.status}, ${r.bytes} B, ${r.ms} ms` });
+    out.push({ id: 'response_time', label: 'Thời gian phản hồi', status: 'PASS', detail: `${r.ms} ms` });
+  } catch (e) {
+    out.push({ id: 'http_host', label: 'HTTP Host Header', status: 'WARNING', detail: String(e.message) });
+    out.push({ id: 'response_time', label: 'Thời gian phản hồi', status: 'WARNING', detail: String(e.message) });
+  }
+  // throughput estimate
+  out.push({ id: 'throughput', label: 'Download/Upload throughput', status: 'WARNING', detail: 'Thử nghiệm throughput cần endpoint dữ liệu trên server Experimental; chưa có endpoint, không giả lập.' });
+  return reply.header('Cache-Control', 'no-store').send({ ok: true, enabled: true, branch: 'experimental', host, port, results: out,
+    summary: { pass: out.filter(c=>c.status==='PASS').length, fail: out.filter(c=>c.status==='FAIL').length,
+      warning: out.filter(c=>c.status==='WARNING').length } });
+});
 app.get('/api/friend/live', async (req, reply) => {
   const a = guard(req, reply, 'friend'); if (!a) return;
   const fresh = cdb.getUser(a.user.id) || a.user;
@@ -509,6 +783,16 @@ app.get('/api/friend/subscription', async (req, reply) => {
 });
 app.get('/api/friend/export', async (req, reply) => {
   const a = guard(req, reply, 'friend'); if (!a) return;
+  if (req.query && req.query.branch === 'experimental') {
+    const u = cdb.getUser(a.user.id) || a.user;
+    const uri = experimentalUri(u, req.query.device);
+    if (!uri) return reply.code(404).send({ ok: false, error: 'not_found' });
+    const name = String(u.username || 'tiktunnel').replace(/[^A-Za-z0-9_.-]/g, '_').slice(0, 40);
+    reply.header('Content-Disposition', `attachment; filename="tiktunnel-experimental-${name}.txt"`);
+    reply.header('Cache-Control', 'no-store');
+    reply.type('text/plain; charset=utf-8');
+    return reply.send(uri + '\n');
+  }
   return sendConfigFile(reply, cdb.getUser(a.user.id) || a.user, req.query.device);
 });
 

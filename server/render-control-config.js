@@ -28,6 +28,20 @@ const inbounds = [
   }
 ];
 
+let expCfg = null;
+try { expCfg = cdb.getExperimentalConfig(); } catch {}
+if (expCfg && expCfg.enabled) {
+  for (const u of cdb.activeVpnUsers()) cdb.getOrCreateExperimentalUuid(u.id);
+  const expUsers = cdb.listExperimentalClients().map((u) => ({ name: u.username + '-exp', uuid: u.uuid, flow: '' }));
+  inbounds.push({
+    type: 'vless',
+    tag: 'vless-experimental-in',
+    listen: '127.0.0.1',
+    listen_port: 23956,
+    users: expUsers
+  });
+}
+
 const cfg = {
   log: { level: 'warn', timestamp: true, output: path.join(cdb.ROOT, 'logs', 'sing-box.log') },
   dns: { servers: [{ type: 'local', tag: 'local-dns' }] },
