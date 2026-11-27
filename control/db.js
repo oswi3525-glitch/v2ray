@@ -234,10 +234,15 @@ function changeQuota(id, action, deltaBytes, quotaBytes, actor) {
   const u = getUser(id);
   if (!u) return null;
   const before = u.quota_bytes;
-  const after = action === 'set' ? quotaBytes : Math.max(0, before + deltaBytes);
+  let after;
+  if (action === 'set') after = quotaBytes;
+  else if (action === 'add') after = before + deltaBytes;
+  else if (action === 'reduce') after = before - deltaBytes;
+  else after = 0;
+  after = Math.max(0, Math.round(after));
   db.exec('BEGIN');
   try {
-    db.prepare('UPDATE users SET quota_bytes=?, exhausted=CASE WHEN ? > 0 AND ? >= ? THEN 1 ELSE exhausted END WHERE id=?')
+    db.prepare('UPDATE users SET quota_bytes=?, exhausted=CASE WHEN ? > 0 THEN CASE WHEN ? >= ? THEN 1 ELSE 0 END ELSE exhausted END WHERE id=?')
       .run(after, after, u.used_upload + u.used_download, after, id);
     db.prepare('INSERT INTO quota_history (user_id, ts, action, delta_bytes, quota_before, quota_after, actor) VALUES (?, ?, ?, ?, ?, ?, ?)')
       .run(id, now(), action, after - before, before, after, actor);

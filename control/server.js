@@ -29,6 +29,8 @@ const startedAt = Date.now();
 const apiTimes = [];
 const rateBuckets = new Map();
 const activeWs = new Map();
+const liveTraffic = new Map();
+const speedPrev = new Map();
 
 function cookieMap(req) {
   const out = {};
@@ -354,6 +356,11 @@ app.get('/api/friend/vpn', async (req, reply) => {
   const a = guard(req, reply, 'friend'); if (!a) return;
   return reply.send({ ok: true, uri: vlessUri(a.user), mode: control.vpn_mode, active: cdb.activeVpnUsers().some((u) => u.id === a.user.id) });
 });
+app.get('/api/friend/live', async (req, reply) => {
+  const a = guard(req, reply, 'friend'); if (!a) return;
+  const fresh = cdb.getUser(a.user.id) || a.user;
+  return reply.send({ ok: true, quota_bytes: fresh.quota_bytes, ...liveStats(fresh) });
+});
 app.get('/api/friend/subscription', async (req, reply) => {
   const a = guard(req, reply, 'friend'); if (!a) return;
   const s = cdb.getSubscription(a.user.id);
@@ -468,6 +475,38 @@ function closeUserConnections(userId) {
   for (const c of set) { try { c.client.close(); } catch {} try { c.upstream.close(); } catch {} }
   activeWs.delete(userId);
 }
+function bumpLiveTraffic(userId, up, down) {
+  const cur = liveTraffic.get(userId) || { up: 0, down: 0 };
+  cur.up += up;
+  cur.down += down;
+  liveTraffic.set(userId, cur);
+}
+function liveStats(user) {
+  const live = liveTraffic.get(user.id) || { up: 0, down: 0 };
+  const usedUpload = (user.used_upload || 0) + live.up;
+  const usedDownload = (user.used_download || 0) + live.down;
+  const now = Date.now();
+  const prev = speedPrev.get(user.id);
+  let upBps = 0, downBps = 0;
+  if (prev) {
+    const dt = (now - prev.t) / 1000;
+    if (dt > 0) {
+      upBps = Math.max(0, (live.up - prev.up) / dt);
+      downBps = Math.max(0, (live.down - prev.down) / dt);
+    }
+  }
+  speedPrev.set(user.id, { t: now, up: live.up, down: live.down });
+  return {
+    active: activeWs.has(user.id),
+    up_bps: Math.round(upBps),
+    down_bps: Math.round(downBps),
+    total_bps: Math.round(upBps + downBps),
+    used_upload: usedUpload,
+    used_download: usedDownload,
+    used_bytes: usedUpload + usedDownload,
+    remaining_bytes: Math.max(0, (user.quota_bytes || 0) - usedUpload - usedDownload)
+  };
+}
 app.server.on('upgrade', (req, socket, head) => {
   const u = new URL(req.url || '/', 'http://localhost');
   const token = u.pathname.startsWith('/vpn/') ? u.pathname.slice('/vpn/'.length) : null;
@@ -492,17 +531,22 @@ app.server.on('upgrade', (req, socket, head) => {
       cdb.db.prepare('UPDATE connection_sessions SET ts_end=?, upload_bytes=?, download_bytes=?, status=? WHERE id=?')
         .run(cdb.now(), pair.upBytes, pair.downBytes, 'closed', Number(sid));
       cdb.recordTraffic(user.id, pair.upBytes, pair.downBytes, 'ws-proxy');
+      bumpLiveTraffic(user.id, -pair.upBytes, -pair.downBytes);
       try { ws.close(); } catch {}
       try { up.close(); } catch {}
     }
     const clientQueue = [];
     const upQueue = [];
     ws.on('message', (d) => {
-      pair.upBytes += Buffer.isBuffer(d) ? d.length : Buffer.byteLength(String(d));
+      const n = Buffer.isBuffer(d) ? d.length : Buffer.byteLength(String(d));
+      pair.upBytes += n;
+      bumpLiveTraffic(user.id, n, 0);
       if (up.readyState === WebSocket.OPEN) up.send(d); else clientQueue.push(d);
     });
     up.on('message', (d) => {
-      pair.downBytes += Buffer.isBuffer(d) ? d.length : Buffer.byteLength(String(d));
+      const n = Buffer.isBuffer(d) ? d.length : Buffer.byteLength(String(d));
+      pair.downBytes += n;
+      bumpLiveTraffic(user.id, 0, n);
       if (ws.readyState === WebSocket.OPEN) ws.send(d); else upQueue.push(d);
     });
     up.on('open', () => {

@@ -60,13 +60,18 @@ async function main() {
   const me = await api('/api/auth/me', { cookie: admin.cookie });
   check('admin session valid', me.status === 200 && me.data.role === 'admin');
 
-  const third = await api('/api/admin/users', { method: 'POST', cookie: admin.cookie, csrf: admin.csrf,
-    body: { username: 'friend3', display_name: 'Third', password: friendPw, quota_gb: 1 } });
-  check('third friend rejected (max 2)', third.status === 409);
+  const maxFriends = envcfg.maxUsers;
+  for (let i = cdb.friendCount(); i < maxFriends; i++) {
+    await api('/api/admin/users', { method: 'POST', cookie: admin.cookie, csrf: admin.csrf,
+      body: { username: `friend${i + 1}`, display_name: `Friend ${i + 1}`, password: friendPw, quota_gb: 1 } });
+  }
+  const overLimit = await api('/api/admin/users', { method: 'POST', cookie: admin.cookie, csrf: admin.csrf,
+    body: { username: 'friend_over_limit', display_name: 'Over limit', password: friendPw, quota_gb: 1 } });
+  check(`friend limit enforced (max ${maxFriends})`, overLimit.status === 409);
 
-  const users = (await api('/api/admin/users', { cookie: admin.cookie })).data.users;
-  check('two friends exist', users.length === 2, `${users.length}`);
-  check('UUIDs unique', new Set(users.map((u) => u.uuid)).size === 2);
+  const users = (await api('/api/admin/users', { cookie: admin.cookie })).data.users.filter((u) => !u.revoked_at);
+  check(`${maxFriends} friends exist`, users.length === maxFriends, `${users.length}`);
+  check('UUIDs unique', new Set(users.map((u) => u.uuid)).size === maxFriends);
   for (const u of users) {
     const r = await api(`/api/admin/users/${u.id}/password`, { method: 'POST', cookie: admin.cookie, csrf: admin.csrf, body: { password: friendPw } });
     check(`password set for ${u.username}`, r.status === 200);
@@ -137,9 +142,9 @@ async function main() {
 
   execFileSync('bash', [path.join(ROOT, 'scripts', 'restart.sh')], { cwd: ROOT, stdio: 'ignore' });
   await sleep(1500);
-  const post = await api('/api/auth/login', { method: 'POST', body: { username: 'admin', password: adminPw } });
+  const post = await api('/api/auth/login', { method: 'POST', body: { username: adminUser, password: adminPw } });
   check('recovery: backend restart, data kept', post.status === 200 && cdb.getUser(users[1].id).quota_bytes > 0);
-  check('recovery: sing-box config restored', configUuids().length === 2);
+  check('recovery: sing-box config restored', configUuids().length === maxFriends);
   const recSub = await api(`/api/sub/${cdb.getSubscription(users[1].id).token}`);
   check('recovery: subscription still valid', recSub.status === 200);
 

@@ -1,6 +1,6 @@
 [
   {
-    "name": "admin first setup / login",
+    "name": "admin login from .env",
     "status": "PASS",
     "detail": "http=200"
   },
@@ -10,14 +10,14 @@
     "detail": ""
   },
   {
-    "name": "third friend rejected (max 2)",
+    "name": "friend limit enforced (max 3)",
     "status": "PASS",
     "detail": ""
   },
   {
-    "name": "two friends exist",
+    "name": "3 friends exist",
     "status": "PASS",
-    "detail": "2"
+    "detail": "3"
   },
   {
     "name": "UUIDs unique",
@@ -31,6 +31,11 @@
   },
   {
     "name": "password set for tiktunnel-user-02",
+    "status": "PASS",
+    "detail": ""
+  },
+  {
+    "name": "password set for friend3",
     "status": "PASS",
     "detail": ""
   },

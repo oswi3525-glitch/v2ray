@@ -37,19 +37,55 @@ async function api(path, opts = {}, refreshed = false) {
 function esc(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
 function fmt(n) { return Number(n || 0).toLocaleString(); }
 function gb(n) { return (Number(n || 0) / 1e9).toFixed(2) + ' GB'; }
+function b64utf8(s) {
+  const bytes = new TextEncoder().encode(s);
+  let bin = '';
+  for (const b of bytes) bin += String.fromCharCode(b);
+  return btoa(bin);
+}
+function openDeepLink(url) {
+  const a = document.createElement('a');
+  a.href = url;
+  a.style.display = 'none';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+function shadowrocketFor(u, prefer = 'sub') {
+  const uri = u?.vless_uri || '';
+  const subUrl = u?.subscription_token ? `${location.origin}/api/sub/${u.subscription_token}` : '';
+  if (!uri && !subUrl) throw new Error('configuration not ready');
+  if (uri && navigator.clipboard?.writeText) navigator.clipboard.writeText(uri).catch(() => {});
+  if (prefer === 'node' && uri) openDeepLink('shadowrocket://add/' + b64utf8(uri));
+  else if (subUrl) openDeepLink('shadowrocket://subscribe?url=' + encodeURIComponent(subUrl));
+  else openDeepLink('shadowrocket://add/' + b64utf8(uri));
+  setTimeout(() => toast('Không mở được Shadowrocket? URI đã được copy — vào app → + → Import from Clipboard'), 1200);
+}
+function speedText(n) {
+  let v = Number(n || 0);
+  if (v <= 0) return '0 B/s';
+  const units = ['B/s', 'KB/s', 'MB/s', 'GB/s'];
+  let i = 0;
+  while (v >= 1024 && i < units.length - 1) { v /= 1024; i++; }
+  return v.toFixed(v >= 100 ? 0 : 1) + ' ' + units[i];
+}
 function copy(text) { navigator.clipboard?.writeText(text).then(() => toast('Copied')).catch(() => toast('Copy failed')); }
 function shell(title, body) {
-  root.innerHTML = `<div class="wrap"><div class="row" style="justify-content:space-between">
-    <h1>TikTunnel Control</h1><div class="row"><span class="sub">${esc(me?.username || '')}</span>
-    <button class="ghost small" id="clear-cache" title="Reload assets without browser cache">Clear cache</button>
-    <button class="ghost small" id="logout">Logout</button></div></div>${body}</div>`;
+  root.innerHTML = `<div class="wrap">
+    <header class="topbar">
+      <div class="brand"><span class="brand-mark">T</span><span><b>TikTunnel</b><small>Control panel</small></span></div>
+      <div class="row"><span class="pill ok">${esc(title)}</span><span class="sub">${esc(me?.username || '')}</span>
+      <button class="ghost small" id="clear-cache" title="Reload assets without browser cache">Clear cache</button>
+      <button class="ghost small" id="logout">Logout</button></div>
+    </header>${body}</div>`;
   document.getElementById('clear-cache').onclick = () => { location.href = location.pathname + '?r=' + Date.now(); };
   document.getElementById('logout').onclick = async () => { await api('/api/auth/logout', { method: 'POST' }); sessionStorage.clear(); location.href = '/'; };
 }
 
 async function authScreen() {
-  root.innerHTML = `<div class="center"><h1>TikTunnel Control</h1>
-    <p class="sub">Sign in</p>
+  root.innerHTML = `<div class="center"><span class="brand-mark" style="width:52px;height:52px;font-size:24px">T</span>
+    <h1>TikTunnel Control</h1>
+    <p class="sub">Đăng nhập để tiếp tục</p>
     <div class="card" style="width:100%;max-width:380px">
       <form id="f">
         <label>Username</label><input id="u" autocomplete="username" required>
@@ -97,9 +133,11 @@ async function adminPage() {
   </div>
   <div class="card"><h2>Accounts</h2><div class="scroll"><table><thead><tr><th>User</th><th>Status</th><th>Quota</th><th>UUID</th><th>Actions</th></tr></thead><tbody>${rows || '<tr><td colspan="5">No accounts yet.</td></tr>'}</tbody></table></div></div>
   <div class="card"><h2>Add to Shadowrocket</h2>
+    <p class="sub">Chọn account rồi bấm: app sẽ mở và tự tạo server. URI cũng được copy để dự phòng.</p>
     ${us.users.length ? `<label>Account</label><select id="shadow-user">${us.users.map(u => `<option value="${u.id}">${esc(u.display_name)} (${esc(u.username)})</option>`).join('')}</select>
     <div class="row" style="margin-top:12px">
-      <button id="shadow-add">Add to Shadowrocket</button>
+      <button id="shadow-add">Add subscription</button>
+      <button class="ghost" id="shadow-add-node">Add single node</button>
       <button class="ghost" id="shadow-copy-uri">Copy VLESS URI</button>
       <button class="ghost" id="shadow-copy">Copy subscription</button>
     </div>` : '<p class="sub">No friend accounts yet. Create one below first.</p>'}
@@ -149,26 +187,18 @@ async function adminPage() {
     if (b.dataset.copy === 'uri') val = u?.vless_uri || '';
     copy(val);
   });
-  async function shadowrocketFor(u) {
-    let uri = u && u.vless_uri;
-    if (!uri && u && u.subscription_token) {
-      const r = await fetch(`/api/sub/${u.subscription_token}?raw=1`);
-      uri = (await r.text()).trim();
-      if (!r.ok) uri = '';
-    }
-    if (!uri || !uri.startsWith('vless://')) throw new Error('configuration not ready');
-    const b64 = btoa(unescape(encodeURIComponent(uri)));
-    location.href = 'shadowrocket://add/' + b64;
-    setTimeout(() => toast('Shadowrocket không mở? Dùng Copy VLESS URI rồi Import from Clipboard'), 900);
-  }
-  document.querySelectorAll('[data-shadow]').forEach(b => b.onclick = async () => {
+  document.querySelectorAll('[data-shadow]').forEach(b => b.onclick = () => {
     const u = us.users.find(x => x.id === Number(b.dataset.id));
-    try { await shadowrocketFor(u); } catch (err) { toast(err.message); }
+    try { shadowrocketFor(u, 'sub'); } catch (err) { toast(err.message); }
   });
   if (document.getElementById('shadow-add')) {
-    document.getElementById('shadow-add').onclick = async () => {
+    document.getElementById('shadow-add').onclick = () => {
       const u = us.users.find(x => x.id === Number(document.getElementById('shadow-user').value));
-      try { await shadowrocketFor(u); } catch (err) { toast(err.message); }
+      try { shadowrocketFor(u, 'sub'); } catch (err) { toast(err.message); }
+    };
+    document.getElementById('shadow-add-node').onclick = () => {
+      const u = us.users.find(x => x.id === Number(document.getElementById('shadow-user').value));
+      try { shadowrocketFor(u, 'node'); } catch (err) { toast(err.message); }
     };
     document.getElementById('shadow-copy').onclick = () => {
       const u = us.users.find(x => x.id === Number(document.getElementById('shadow-user').value));
@@ -202,35 +232,70 @@ async function adminPage() {
 async function friendPage() {
   const [u, v, sub] = await Promise.all([api('/api/friend/me'), api('/api/friend/vpn'), api('/api/friend/subscription')]);
   const uu = u.user;
-  shell('Account', `<div class="grid">
-    <div class="stat"><span>Username</span><b>${esc(uu.display_name)}</b></div>
-    <div class="stat"><span>Status</span><b>${uu.enabled && !uu.exhausted ? 'Active' : 'Inactive'}</b></div>
-    <div class="stat"><span>Allocated</span><b>${gb(uu.quota_bytes)}</b></div>
-    <div class="stat"><span>Used</span><b>${gb(uu.used_upload + uu.used_download)}</b></div>
-    <div class="stat"><span>Remaining</span><b>${gb(uu.remaining_bytes)}</b></div>
+  shell('Account', `<div class="card hero">
+    <div><span class="sub">Xin chào,</span><h2>${esc(uu.display_name)}</h2>
+    <p class="sub">${uu.enabled && !uu.exhausted ? 'Tài khoản đang hoạt động' : 'Tài khoản tạm ngưng — liên hệ admin'}</p></div>
+    <span class="pill ${uu.enabled && !uu.exhausted ? 'ok' : 'bad'}" id="live-status">${uu.enabled && !uu.exhausted ? 'Active' : 'Inactive'}</span>
+  </div>
+  <div class="card live-card">
+    <div class="live-head"><h2>Dung lượng & tốc độ</h2><span class="sub">cập nhật mỗi 2 giây</span></div>
+    <div class="quota-line"><span>Đã dùng <b id="quota-used">—</b></span><span class="sub">/ <span id="quota-total">—</span></span></div>
+    <div class="progress"><div class="progress-fill" id="quota-bar"></div></div>
+    <div class="live-grid">
+      <div class="live-item"><span>Còn lại</span><b id="quota-left">—</b></div>
+      <div class="live-item"><span>Tải về ↓</span><b id="speed-down">0 B/s</b></div>
+      <div class="live-item"><span>Gửi lên ↑</span><b id="speed-up">0 B/s</b></div>
+    </div>
+  </div>
+  <div class="grid">
+    <div class="stat"><span>Username</span><b>${esc(uu.username)}</b></div>
     <div class="stat"><span>Upload</span><b>${gb(uu.used_upload)}</b></div>
     <div class="stat"><span>Download</span><b>${gb(uu.used_download)}</b></div>
-    <div class="stat"><span>Expires</span><b style="font-size:13px">${esc(uu.expires_at || '—')}</b></div>
+    <div class="stat"><span>Hết hạn</span><b style="font-size:14px">${esc(uu.expires_at || 'Không giới hạn')}</b></div>
   </div>
-  <div class="card"><h2>Connect</h2>
-    <p class="sub">Mode: ${esc(v.mode)} — ${v.active ? 'configuration active' : 'configuration inactive'}</p>
-    <p class="mono">${esc(v.uri || 'No configuration available')}</p>
+  <div class="card"><h2>Kết nối</h2>
+    <p class="sub">Chế độ: ${esc(v.mode)} — ${v.active ? 'cấu hình đang hoạt động' : 'chưa có kết nối'}</p>
     <div class="row" style="margin-top:12px">
-      <button id="copyuri">Copy VLESS URI</button>
+      <button id="addios">Add to Shadowrocket</button>
+      <button class="ghost" id="addios-node">Add single node</button>
+      <button class="ghost" id="copyuri">Copy VLESS URI</button>
       <button class="ghost" id="copysub">Copy subscription URL</button>
-      <a class="ghost" style="text-decoration:none" id="addios" href="#">Add to Shadowrocket</a>
     </div>
-    <p class="sub">On iPhone: open the subscription URL in Safari, or copy the VLESS URI and paste it into Shadowrocket → + → Import from Clipboard.</p>
+    <details class="adv"><summary>Xem cấu hình VLESS</summary><p class="mono">${esc(v.uri || 'No configuration available')}</p></details>
+    <p class="sub">Trên iPhone: bấm “Add to Shadowrocket” để app mở và tự tạo server. Nếu không mở, URI đã được copy — vào Shadowrocket → + → Import from Clipboard.</p>
   </div>
-  <div class="card"><h2>Usage</h2><canvas id="chart" height="120"></canvas></div>`);
+  <div class="card"><h2>Lưu lượng theo thời gian</h2><canvas id="chart" height="120"></canvas></div>`);
   document.getElementById('copyuri').onclick = () => copy(v.uri || '');
   document.getElementById('copysub').onclick = () => copy(`${location.origin}${sub.url}`);
-  document.getElementById('addios').onclick = (e) => {
-    e.preventDefault();
-    if (!v.uri) { toast('Configuration not ready'); return; }
-    location.href = 'shadowrocket://add/' + btoa(unescape(encodeURIComponent(v.uri)));
-    setTimeout(() => toast('Shadowrocket không mở? Dùng Copy VLESS URI rồi Import from Clipboard'), 900);
+  document.getElementById('addios').onclick = () => {
+    try { shadowrocketFor({ vless_uri: v.uri, subscription_token: sub.token }, 'sub'); } catch (err) { toast(err.message); }
   };
+  document.getElementById('addios-node').onclick = () => {
+    try { shadowrocketFor({ vless_uri: v.uri, subscription_token: sub.token }, 'node'); } catch (err) { toast(err.message); }
+  };
+  async function refreshLive() {
+    try {
+      const d = await api('/api/friend/live');
+      const quota = Number(d.quota_bytes || 0);
+      const used = Number(d.used_bytes || 0);
+      const pct = quota > 0 ? Math.min(100, (used / quota) * 100) : 0;
+      document.getElementById('quota-used').textContent = gb(used);
+      document.getElementById('quota-total').textContent = quota > 0 ? gb(quota) : 'Không giới hạn';
+      document.getElementById('quota-left').textContent = quota > 0 ? gb(d.remaining_bytes) : '∞';
+      const bar = document.getElementById('quota-bar');
+      bar.style.width = pct + '%';
+      bar.classList.toggle('warn', pct >= 75 && pct < 90);
+      bar.classList.toggle('danger', pct >= 90);
+      document.getElementById('speed-down').textContent = speedText(d.down_bps);
+      document.getElementById('speed-up').textContent = speedText(d.up_bps);
+      const st = document.getElementById('live-status');
+      st.textContent = d.active ? 'Đang kết nối' : (uu.enabled && !uu.exhausted ? 'Active' : 'Inactive');
+      st.className = 'pill ' + (d.active || (uu.enabled && !uu.exhausted) ? 'ok' : 'bad');
+    } catch {}
+  }
+  await refreshLive();
+  const timer = setInterval(refreshLive, 2000);
+  window.addEventListener('pagehide', () => clearInterval(timer));
   const h = await api('/api/friend/usage');
   if (window.Chart && h.history.length) {
     const pts = [...h.history].reverse();
@@ -246,7 +311,6 @@ async function friendPage() {
 (async () => {
   try {
     const r = await fetch('/api/auth/me');
-    if (!r.ok && !location.pathname.startsWith('/')) { await authScreen(); return; }
     if (r.ok) {
       me = await r.json();
       if (me.role === 'admin') return adminPage();

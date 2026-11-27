@@ -1,6 +1,6 @@
 # TikTunnel Control
 
-Rootless VPN control panel: **Admin + up to 2 friends**, per-user quota from real traffic, VLESS-over-WebSocket via sing-box, Node/Fastify backend, SQLite database.
+Rootless VPN control panel: **Admin + up to `MAX_USERS` friends (3 by default)**, per-user quota from real traffic, live GB/speed dashboard, VLESS-over-WebSocket via sing-box, Node/Fastify backend, SQLite database.
 
 > **STATUS: Implemented and verified locally. Public Cloudcode path NOT verified.**
 > `vn-hn.cldcode.host:23952` returned TCP connection refused from the earlier workspace and the HTTPS subdomain returned Cloudflare 404 to a WS upgrade. Do not import the subscription on a real device until the Cloudcode/Pterodactyl port mapping is confirmed. See `reports/cloudcode-audit.md`.

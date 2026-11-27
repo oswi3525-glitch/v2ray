@@ -1,39 +1,37 @@
-#IOS / Shadowrocket — Subscription Import
+# iOS / Shadowrocket — hướng dẫn nhập cấu hình
 
-**Current status:** the generated subscription is a standard VLESS URI but it is configured as
-`security=none` with address `vn-hn.cldcode.host`, port `23952`. Public TCP 23952 was refused when tested from outside Cloudcode, and TLS was not verifiable, so **this subscription is not yet usable from a phone**. Do not treat it as a working VPN until Cloudcode forwarding is verified and TLS/REALITY is enabled (see CONFIGURATION.md and reports/cloudcode-migration.md).
+**Trạng thái:** cấu hình được sinh ra là VLESS-over-WebSocket/TLS trên cổng 443 tại `app-medium-1-ac2e.cldcode.host`. Đường public (Cloudcode/Cloudflare) **chưa được xác minh** ở môi trường hiện tại — xem `reports/cloudcode-audit.md`. Không coi là VPN hoạt động cho tới khi WS upgrade qua HTTPS hoạt động và đã test trên thiết bị thật.
 
-## Get your subscription URL
+## Cách nhập nhanh từ web panel
 
-Only the account owner (or admin) should receive it. After creating an account, the admin response contains `subscription_url`:
+Đăng nhập tài khoản friend → thẻ **Kết nối**:
 
-```
-/api/sub/<long-random-token>
-```
+1. **Add to Shadowrocket** — mở app qua `shadowrocket://subscribe?url=<subscription-url-encoded>` và tự tạo server từ subscription. Đây là cách dùng chính.
+2. **Add single node** — mở `shadowrocket://add/<base64(vless-uri)>` và tạo đúng 1 node.
+3. URI VLESS cũng được **tự động copy** khi bấm. Nếu app không mở: mở Shadowrocket → `+` → **Import from Clipboard**.
 
-The full URL is `http://<server>:3000/api/sub/<token>` — the API must be reachable from the device and protected appropriately (ideally behind TLS). In this lab the API is loopback-only, so the subscription cannot be fetched from a phone at all.
+Admin có các nút tương tự trong thẻ **Add to Shadowrocket** (chọn account trước).
 
-The endpoint returns base64 by default (standard subscription format). `?raw=1` returns the plain VLESS URI, which can also be pasted directly.
+## Subscription URL
 
-## Import steps on iOS
+`/api/sub/<token>` — base64 theo chuẩn subscription; `?raw=1` trả về plain VLESS URI. URL đầy đủ là `https://<public_https_host>/api/sub/<token>`. Coi URL này như mật khẩu: ai có URL thì dùng được account đó.
 
-1. Open **Shadowrocket** → top-right **+** (Add Node).
-2. Choose **Type: VLESS**.
-3. If using a subscription URL: tap the **Subscribe** / group icon, choose **Add Subscription**, paste the full `/api/sub/<token>` URL, set the remark, and tap **Done**. Then open the subscription group and select a node.
-4. If using the raw URI: choose **Import from Clipboard** / paste into the link field; Shadowrocket will fill UUID, address, port and network settings automatically.
-5. Verify fields:
-   - Address = vn-hn.cldcode.host
-   - Port = 8443
-   - UUID = your personal UUID (never share it)
-   - Network = TCP
-   - Security = TLS with SNI = your domain (production) — currently `none` in this lab
-   - Flow = `xtls-rprx-vision` if TLS/Xtls is enabled and the Shadowrocket version supports it; otherwise leave empty
-6. Save, then toggle the switch to connect. Confirm the connected indicator and test `https://www.apple.com` in Safari.
-7. On Wi-Fi → 4G/5G switch, confirm the connection recovers (this test requires a physical device and is SKIP in this environment).
+## Nhập thủ công trên iPhone
 
-## Privacy notes
+1. Mở Shadowrocket → `+`.
+2. Chọn **Type: VLESS**.
+3. Điền theo cấu hình VLESS URI:
+   - Address / Host / SNI = `app-medium-1-ac2e.cldcode.host`
+   - Port = `443`
+   - UUID = UUID riêng của tài khoản (không chia sẻ)
+   - Network = **WebSocket**, Path = `/vpn/<subscription-token>`, Host header = `app-medium-1-ac2e.cldcode.host`
+   - Security = **TLS** (không bật “Allow Invalid Certificates”)
+4. Lưu, bật switch kết nối, mở `https://www.apple.com` trong Safari để kiểm tra.
+5. Chuyển Wi-Fi ↔ 4G/5G và kiểm tra kết nối phục hồi (cần thiết bị thật).
 
-- Each person gets a unique UUID and a unique subscription token. Never reuse or share them.
-- If a friend loses access, revoke their account (`DELETE /api/users/:id`); their UUID stops working immediately.
-- The subscription contains the UUID encoded in base64 — anyone with the subscription URL can use that account. Treat the URL like a password.
-- This project does not claim any ISP zero-rating; using a VPN may change how traffic is billed by the mobile operator.
+## Lưu ý bảo mật
+
+- Mỗi user một UUID và một subscription token riêng; không dùng chung.
+- Revoke account (`DELETE /api/admin/users/:id`) sẽ vô hiệu hoá cả UUID lẫn subscription ngay lập tức.
+- Không đưa mật khẩu đăng nhập web vào VLESS URI.
+- Dùng VPN có thể làm thay đổi cách nhà mạng tính cước; dự án không khẳng định miễn phí data.

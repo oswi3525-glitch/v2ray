@@ -1,47 +1,52 @@
 # SHADOWROCKET.md
 
-**Important:** the generated link is valid in format, but the public Cloudcode path is NOT verified. Do not present it as a working VPN until external TCP/WS and iOS connection tests succeed.
+**Important:** link được sinh đúng định dạng, nhưng đường public Cloudcode/Cloudflare **chưa được xác minh**. Chưa coi là VPN hoạt động cho tới khi WS upgrade qua HTTPS và kết nối iOS thành công. Xem `reports/cloudcode-audit.md`.
 
-## Generated link (target architecture)
+## Cấu hình được sinh ra
 
 ```
 vless://<UUID>@app-medium-1-ac2e.cldcode.host:443
   ?encryption=none
   &type=ws
-  &path=/vpn/<subscription-token>   (dấu / được giữ nguyên, không mã hoá %2F)
+  &path=/vpn/<subscription-token>
   &host=app-medium-1-ac2e.cldcode.host
   &security=tls
   &sni=app-medium-1-ac2e.cldcode.host
 #<display-name>
 ```
 
-TLS is terminated at Cloudflare / the Cloudcode HTTPS tunnel. The path carries that user's subscription token; it authenticates the WebSocket upgrade in the Node proxy. Each friend has a unique UUID and token.
+TLS được terminate tại Cloudflare / HTTPS tunnel. Đường dẫn `/vpn/<token>` dùng để xác thực WebSocket upgrade trong Node proxy. Mỗi friend có UUID và token riêng. Khi `vpn_mode: tcp`, URI chuyển sang TCP plaintext trên `public_tcp_host:public_tcp_port`.
 
-## Friend dashboard
+## Deep link trên web panel
 
-Each friend logs in with their own username/password and sees only their own data:
+| Nút | Deep link | Hành vi |
+|---|---|---|
+| **Add to Shadowrocket** (chính) | `shadowrocket://subscribe?url=<encoded-sub-url>` | Mở app, tạo subscription và tự tạo các server bên trong |
+| **Add single node** | `shadowrocket://add/<base64(vless-uri)>` | Mở app và tạo đúng 1 node VLESS |
 
-- **Copy VLESS URI** — raw URI for manual import.
-- **Copy subscription URL** — `/api/sub/<token>` returns base64 by default, `?raw=1` returns the plain URI.
-- **Add to Shadowrocket** — attempts `shadowrocket://add/<base64(uri)>`; if iOS does not handle it, the UI shows a fallback hint after ~1 s. Use **Copy VLESS URI** then *Import from Clipboard*, or **Copy subscription URL** then add it as a subscription. The same button exists in the Admin dashboard per account. Total accounts = 4 (Admin + 3 friends).
+Trước khi mở app, web panel **copy VLESS URI vào clipboard** để dự phòng. Nếu iOS không mở được custom scheme, dùng **Copy VLESS URI** → Shadowrocket → `+` → **Import from Clipboard**, hoặc mở subscription URL trong Safari.
 
-## Manual import on iPhone
+Lưu ý: navigation tới custom scheme được tạo đồng bộ bằng phần tử `<a>` trong cùng user gesture — không `fetch` trước khi mở app (iOS Safari chặn custom scheme sau `await`).
 
-1. Install Shadowrocket from the App Store.
-2. Copy the VLESS URI (or subscription URL) in the friend dashboard.
-3. Open Shadowrocket → `+` → **Import from Clipboard** (or add a subscription with the URL).
-4. Confirm fields: Type VLESS, Address `app-medium-1-ac2e.cldcode.host`, Port 443, Network WebSocket, Path `/vpn/<token>`, Host/SNI `app-medium-1-ac2e.cldcode.host`, Security TLS.
-5. Save, toggle connect, then open `https://www.apple.com` in Safari and verify.
+Tổng số account: Admin + tối đa `MAX_USERS` friend (mặc định 3).
 
-## Required verification before rollout
+## Nhập thủ công trên iPhone
 
-- Cloudcode forwards the HTTPS subdomain to app port 23952.
-- WebSocket Upgrade is passed through (currently a probe returned Cloudflare 404 here).
-- The iOS device can resolve/connect and reconnect after Wi-Fi↔4G/5G changes.
-- DNS leaks are checked on the device (server-side DNS checks are not enough).
+1. Cài Shadowrocket từ App Store.
+2. Copy VLESS URI (hoặc subscription URL) trong dashboard.
+3. Shadowrocket → `+` → **Import from Clipboard** (hoặc thêm subscription với URL).
+4. Kiểm tra: Type VLESS, Address/SNI/Host `app-medium-1-ac2e.cldcode.host`, Port `443`, Network WebSocket, Path `/vpn/<token>`, Security TLS.
+5. Lưu, bật connect, mở `https://www.apple.com` trong Safari để verify.
 
-## Never do
+## Cần xác minh trước khi triển khai
 
-- Do not put the web login password into the VLESS URI.
-- Do not share one UUID among friends.
-- Do not disable TLS certificate validation.
+- Cloudcode chuyển HTTPS subdomain tới app port 23952.
+- WebSocket Upgrade được pass qua (hiện probe trả Cloudflare 404).
+- Thiết bị iOS resolve/connect và reconnect sau khi đổi Wi-Fi ↔ 4G/5G.
+- Kiểm tra DNS leak trên thiết bị (check server-side là chưa đủ).
+
+## Không nên
+
+- Không đưa mật khẩu web vào VLESS URI.
+- Không dùng chung UUID giữa các friend.
+- Không tắt xác thực chứng chỉ TLS.
