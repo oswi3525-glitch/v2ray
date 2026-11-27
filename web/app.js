@@ -100,6 +100,7 @@ async function adminPage() {
     ${us.users.length ? `<label>Account</label><select id="shadow-user">${us.users.map(u => `<option value="${u.id}">${esc(u.display_name)} (${esc(u.username)})</option>`).join('')}</select>
     <div class="row" style="margin-top:12px">
       <button id="shadow-add">Add to Shadowrocket</button>
+      <button class="ghost" id="shadow-copy-uri">Copy VLESS URI</button>
       <button class="ghost" id="shadow-copy">Copy subscription</button>
     </div>` : '<p class="sub">No friend accounts yet. Create one below first.</p>'}
   </div>
@@ -156,7 +157,9 @@ async function adminPage() {
       if (!r.ok) uri = '';
     }
     if (!uri || !uri.startsWith('vless://')) throw new Error('configuration not ready');
-    location.href = 'shadowrocket://add/' + btoa(unescape(encodeURIComponent(uri)));
+    const b64 = btoa(unescape(encodeURIComponent(uri)));
+    location.href = 'shadowrocket://add/' + b64;
+    setTimeout(() => toast('Shadowrocket không mở? Dùng Copy VLESS URI rồi Import from Clipboard'), 900);
   }
   document.querySelectorAll('[data-shadow]').forEach(b => b.onclick = async () => {
     const u = us.users.find(x => x.id === Number(b.dataset.id));
@@ -170,6 +173,10 @@ async function adminPage() {
     document.getElementById('shadow-copy').onclick = () => {
       const u = us.users.find(x => x.id === Number(document.getElementById('shadow-user').value));
       copy(u ? `${location.origin}/api/sub/${u.subscription_token}` : '');
+    };
+    document.getElementById('shadow-copy-uri').onclick = () => {
+      const u = us.users.find(x => x.id === Number(document.getElementById('shadow-user').value));
+      copy(u?.vless_uri || '');
     };
   }
   document.querySelectorAll('[data-act]').forEach(b => b.onclick = async () => {
@@ -222,6 +229,7 @@ async function friendPage() {
     e.preventDefault();
     if (!v.uri) { toast('Configuration not ready'); return; }
     location.href = 'shadowrocket://add/' + btoa(unescape(encodeURIComponent(v.uri)));
+    setTimeout(() => toast('Shadowrocket không mở? Dùng Copy VLESS URI rồi Import from Clipboard'), 900);
   };
   const h = await api('/api/friend/usage');
   if (window.Chart && h.history.length) {

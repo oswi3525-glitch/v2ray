@@ -117,11 +117,15 @@ function vlessUri(u) {
   if (control.vpn_mode === 'tcp') {
     return `vless://${v.uuid}@${control.publicTcpHost}:${control.publicTcpPort}?encryption=none&type=tcp&security=none#${name}`;
   }
-  const q = new URLSearchParams({
-    encryption: 'none', type: 'ws', path: s.path,
-    host: control.public_https_host, security: 'tls', sni: control.public_https_host
-  });
-  return `vless://${v.uuid}@${control.public_https_host}:443?${q.toString()}#${name}`;
+  const q = [
+    'encryption=none',
+    'type=ws',
+    `path=${s.path}`,
+    `host=${control.public_https_host}`,
+    'security=tls',
+    `sni=${control.public_https_host}`
+  ].join('&');
+  return `vless://${v.uuid}@${control.public_https_host}:443?${q}#${name}`;
 }
 
 let applyChain = Promise.resolve();

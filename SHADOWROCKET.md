@@ -8,7 +8,7 @@
 vless://<UUID>@app-medium-1-ac2e.cldcode.host:443
   ?encryption=none
   &type=ws
-  &path=/vpn/<subscription-token>
+  &path=/vpn/<subscription-token>   (dấu / được giữ nguyên, không mã hoá %2F)
   &host=app-medium-1-ac2e.cldcode.host
   &security=tls
   &sni=app-medium-1-ac2e.cldcode.host
@@ -23,7 +23,7 @@ Each friend logs in with their own username/password and sees only their own dat
 
 - **Copy VLESS URI** — raw URI for manual import.
 - **Copy subscription URL** — `/api/sub/<token>` returns base64 by default, `?raw=1` returns the plain URI.
-- **Add to Shadowrocket** — attempts `shadowrocket://add/<base64(uri)>`; if iOS does not handle it, use manual import below. The same button is available in the Admin dashboard for each account. Total accounts = 4 (Admin + 3 friends).
+- **Add to Shadowrocket** — attempts `shadowrocket://add/<base64(uri)>`; if iOS does not handle it, the UI shows a fallback hint after ~1 s. Use **Copy VLESS URI** then *Import from Clipboard*, or **Copy subscription URL** then add it as a subscription. The same button exists in the Admin dashboard per account. Total accounts = 4 (Admin + 3 friends).
 
 ## Manual import on iPhone
 
