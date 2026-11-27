@@ -13,7 +13,8 @@ Mỗi tab là một builder async; khi chuyển tab: chạy cleanup (clear inter
 
 ## 2. Thành phần thiết kế lại
 
-- Header: brand mark, role pill, username, Light/Dark toggle, Reload, Logout.
+- Header: brand mark, role pill, username, notification bell (badge chưa đọc + dropdown + mark-all-read), Light/Dark toggle, Reload, Logout.
+- Chống treo loading: timeout API 9s (boot 8s), timeout builder 12s, nút Thử lại ở error state và boot, boot-guard thay spinner sau 10s nếu script lỗi.
 - Tab bar: ngang, cuộn được trên iPhone, active state rõ.
 - Card/stat: border + shadow nhẹ, spacing nhất quán; `tabular-nums` cho số liệu.
 - Thanh quota: fill đổi màu theo ngưỡng 75%/90%; live speed cập nhật mỗi 5s.

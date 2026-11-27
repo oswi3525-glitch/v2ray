@@ -11,6 +11,8 @@ Auth: session cookie `tiktunnel_session` (HttpOnly). All mutating admin requests
 | POST | `/api/auth/login` | none | `{username,password}` → `{role,csrf}` |
 | POST | `/api/auth/logout` | session | end session |
 | GET | `/api/auth/me` | session | `{role,csrf,username}` |
+| GET | `/api/notifications?limit&offset` | session | `{items,unread}` — real events (quota, password, device, account) |
+| POST | `/api/notifications/read` | session + CSRF | `{id?}` marks one or all read |
 
 ## Admin
 
@@ -24,7 +26,7 @@ Auth: session cookie `tiktunnel_session` (HttpOnly). All mutating admin requests
 | GET | `/api/admin/devices?limit&offset` | all devices with real VPN-session status, traffic, last seen |
 | GET | `/api/admin/speedtests` | last 50 speed-test results across users |
 | GET | `/api/admin/security` | security events + active policy summary |
-| GET | `/api/monitor/latency` | 8 real TCP probes: current/average/peak/jitter/packet loss |
+| GET | `/api/monitor/latency` | 6 concurrent real TCP probes (1.5s): current/average/peak/jitter/packet loss |
 | PATCH | `/api/admin/users/:id` | `{display_name,enabled,expires_at,uuid}` |
 | DELETE | `/api/admin/users/:id` | revoke friend and VPN access |
 | POST | `/api/admin/users/:id/quota` | `{action:set|add|reduce|reset,gb}` — `set` replaces, `add`/`reduce` adjust by `gb`, `reset` sets quota to 0 (unlimited); `exhausted` is recomputed |

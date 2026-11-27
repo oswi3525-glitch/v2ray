@@ -203,6 +203,7 @@ for (const p of ['/', '/admin', '/friend', '/setup', '/login']) {
 }
 app.get('/style.css', readStatic('style.css', 'text/css; charset=utf-8'));
 app.get('/app.js', readStatic('app.js', 'application/javascript; charset=utf-8'));
+app.get('/boot-guard.js', readStatic('boot-guard.js', 'application/javascript; charset=utf-8'));
 app.get('/health', async () => ({ ok: true, service: 'tiktunnel-control', uptime_s: Math.floor((Date.now() - startedAt) / 1000) }));
 
 app.post('/api/auth/login', async (req, reply) => {
@@ -260,6 +261,20 @@ app.get('/api/auth/me', async (req, reply) => {
   if (!s) return reply.code(401).send({ ok: false, error: 'unauthorized' });
   const u = s.role === 'admin' ? cdb.getAdmin() : cdb.getUser(s.user_id);
   return reply.send({ ok: true, role: s.role, csrf: s.csrf, username: u?.username });
+});
+
+app.get('/api/notifications', async (req, reply) => {
+  const s = sessionFor(req);
+  if (!s) return reply.code(401).send({ ok: false, error: 'unauthorized' });
+  const p = page(req.query, 20, 50);
+  return reply.send({ ok: true, unread: cdb.unreadCount(s.user_id, s.role),
+    items: cdb.notifications(s.user_id, s.role, p.limit, p.offset), ...p });
+});
+app.post('/api/notifications/read', async (req, reply) => {
+  const s = sessionFor(req);
+  if (!s || req.headers['x-csrf-token'] !== s.csrf) return reply.code(401).send({ ok: false, error: 'unauthorized' });
+  cdb.markNotificationsRead(s.user_id, s.role, req.body?.id ?? null);
+  return reply.send({ ok: true, unread: cdb.unreadCount(s.user_id, s.role) });
 });
 
 app.get('/api/admin/overview', async (req, reply) => {
@@ -360,6 +375,8 @@ app.post('/api/admin/users/:id/quota', async (req, reply) => {
   const delta = Math.round(gb * 1e9);
   const u = cdb.changeQuota(Number(req.params.id), action, delta, delta, 'admin');
   if (!u) return reply.code(404).send({ ok: false, error: 'not_found' });
+  cdb.notify({ userId: u.id, role: 'friend', type: 'quota', title: 'Quota đã được cập nhật',
+    body: `Hạn mức mới: ${u.quota_bytes === 0 ? 'không giới hạn' : (u.quota_bytes / 1e9).toFixed(2) + ' GB'}` });
   return reply.send({ ok: true, user: publicUser(u) });
 });
 
@@ -384,6 +401,8 @@ app.post('/api/admin/users/:id/password', async (req, reply) => {
   const a = guard(req, reply, 'admin'); if (!a || !csrfOk(req, a)) return reply.code(401).send({ ok: false, error: 'unauthorized' });
   if (!validPassword(req.body?.password)) return reply.code(400).send({ ok: false, error: 'invalid_password' });
   cdb.setFriendPassword(Number(req.params.id), bcrypt.hashSync(req.body.password, 12));
+  cdb.notify({ userId: Number(req.params.id), role: 'friend', type: 'security',
+    title: 'Mật khẩu đã được admin đặt lại', body: 'Liên hệ admin nếu bạn không thực hiện thao tác này.' });
   return reply.send({ ok: true });
 });
 
@@ -490,6 +509,8 @@ app.post('/api/friend/password', async (req, reply) => {
   if (!validPassword(req.body?.password)) return reply.code(400).send({ ok: false, error: 'invalid_password' });
   cdb.setFriendPassword(a.user.id, bcrypt.hashSync(req.body.password, 12));
   cdb.securityEvent('friend', 'password_changed', String(a.user.id), req.ip);
+  cdb.notify({ userId: a.user.id, role: 'friend', type: 'security',
+    title: 'Mật khẩu tài khoản đã đổi', body: 'Nếu không phải bạn, hãy đổi mật khẩu ngay.' });
   return reply.send({ ok: true });
 });
 
@@ -569,8 +590,8 @@ app.get('/api/admin/speedtests', async (req, reply) => {
 app.get('/api/monitor/latency', async (req, reply) => {
   if (!guard(req, reply, 'admin')) return;
   const [host, port] = (control.probe_endpoints[0] || '1.1.1.1:443').split(':');
-  const samples = [];
-  for (let i = 0; i < 8; i++) { const r = await probe(host, Number(port)); samples.push(r.ok ? r.ms : null); }
+  const results = await Promise.all(Array.from({ length: 6 }, () => probe(host, Number(port), 1500)));
+  const samples = results.map((r) => (r.ok ? r.ms : null));
   const ok = samples.filter((x) => x !== null);
   const avg = ok.length ? ok.reduce((a, b) => a + b, 0) / ok.length : 0;
   const peak = ok.length ? Math.max(...ok) : 0;
@@ -643,11 +664,11 @@ function systemStats() {
   };
 }
 
-function probe(host, port) {
+function probe(host, port, timeout = 3000) {
   return new Promise((resolve) => {
     const t = Date.now();
     const s = net.connect(port, host);
-    s.setTimeout(3000);
+    s.setTimeout(timeout);
     s.on('connect', () => { const ms = Date.now() - t; s.destroy(); resolve({ host, port, ok: true, ms }); });
     s.on('error', () => resolve({ host, port, ok: false, ms: null }));
     s.on('timeout', () => { s.destroy(); resolve({ host, port, ok: false, ms: null }); });
@@ -727,7 +748,12 @@ app.server.on('upgrade', (req, socket, head) => {
   }
   const user = cdb.getUserByToken(token);
   if (!user || !accountReady(user)) { socket.destroy(); return; }
-  if (deviceId) cdb.upsertDevice(user.id, deviceId);
+  if (deviceId) {
+    const known = cdb.getDevice(user.id, deviceId);
+    cdb.upsertDevice(user.id, deviceId);
+    if (!known) cdb.notify({ userId: user.id, role: 'friend', type: 'device',
+      title: 'Thiết bị mới đã kết nối VPN', body: `Device ID: ${deviceId}` });
+  }
   wss.handleUpgrade(req, socket, head, (ws) => {
     let up;
     try { up = new WebSocket(`ws://${control.singbox_ws_host}:${control.singbox_ws_port}${control.ws_path}`); }
@@ -805,6 +831,10 @@ function enforceQuota() {
         cdb.db.prepare('INSERT INTO quota_history (user_id, ts, action, delta_bytes, quota_before, quota_after, actor, note) VALUES (?, ?, ?, 0, ?, ?, ?, ?)')
           .run(u.id, cdb.now(), 'exhausted', u.quota_bytes, u.quota_bytes, 'quota-worker', 'quota reached; VPN access revoked');
         cdb.audit('quota-worker', 'quota_exhausted', u.username, `used=${used} quota=${u.quota_bytes}`);
+        cdb.notify({ userId: u.id, role: 'friend', type: 'quota',
+          title: 'Đã hết dung lượng', body: 'VPN đã bị tạm ngưng vì đạt hạn mức. Liên hệ admin để cấp thêm.' });
+        cdb.notify({ userId: 0, role: 'admin', type: 'quota',
+          title: 'Account exhausted', body: `${u.username} reached its quota` });
       }
       closeUserConnections(u.id);
       applyConfig().catch(() => {});
@@ -842,6 +872,8 @@ async function main() {
     cdb.addMetric({ cpu_pct: s.cpu_pct, ram_used_kb: s.ram_used_kb, ram_total_kb: s.ram_total_kb,
       net_rx_bytes: n.rx_bps, net_tx_bytes: n.tx_bps, active_vpn: cdb.activeVpnUsers().length,
       api_latency_ms: s.api_latency_ms });
+    cdb.purgeNotifications(200);
+    cdb.purgeSpeedTests(100);
   }, 60000).unref();
   const shutdown = async () => { try { await app.close(); } finally { process.exit(0); } };
   process.on('SIGTERM', shutdown);

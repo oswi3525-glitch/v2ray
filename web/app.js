@@ -13,18 +13,23 @@ function csrfFromCookie() {
   const item = document.cookie.split('; ').find(x => x.startsWith('tiktunnel_csrf='));
   return item ? decodeURIComponent(item.slice('tiktunnel_csrf='.length)) : '';
 }
+function timedFetch(path, opts = {}, ms = 9000) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), ms);
+  return fetch(path, { ...opts, signal: ctrl.signal }).finally(() => clearTimeout(timer));
+}
 async function api(path, opts = {}, refreshed = false) {
   const o = { credentials: 'same-origin', headers: {}, ...opts };
   o.headers = { ...o.headers };
   if (opts.body) o.headers['Content-Type'] = 'application/json';
   const csrf = sessionStorage.getItem('csrf') || csrfFromCookie();
   if (csrf) o.headers['x-csrf-token'] = csrf;
-  const r = await fetch(path, o);
+  const r = await timedFetch(path, o);
   let d = {};
   try { d = await r.json(); } catch { d = {}; }
   if (!r.ok) {
     if (r.status === 401 && d.error === 'unauthorized' && !path.startsWith('/api/auth/') && !refreshed) {
-      const fresh = await fetch('/api/auth/me', { credentials: 'same-origin' }).then(x => x.json()).catch(() => ({}));
+      const fresh = await timedFetch('/api/auth/me', { credentials: 'same-origin' }, 5000).then(x => x.json()).catch(() => ({}));
       if (fresh.ok && fresh.csrf) {
         sessionStorage.setItem('csrf', fresh.csrf);
         return api(path, opts, true);
@@ -47,10 +52,16 @@ function speedText(n) {
 }
 function mbpsText(n) { return Number(n || 0).toFixed(n >= 100 ? 0 : 1); }
 function copy(text) { navigator.clipboard?.writeText(text).then(() => toast('Đã copy')).catch(() => toast('Copy thất bại')); }
+function randomId() {
+  if (crypto.randomUUID) return crypto.randomUUID().replace(/-/g, '');
+  const bytes = new Uint8Array(16);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+}
 function deviceId() {
   let id = localStorage.getItem('tiktunnel_device_id');
   if (!id || !/^[A-Za-z0-9_-]{8,64}$/.test(id)) {
-    id = crypto.randomUUID().replace(/-/g, '') + crypto.randomUUID().replace(/-/g, '').slice(0, 16);
+    id = randomId() + randomId().slice(0, 16);
     localStorage.setItem('tiktunnel_device_id', id);
   }
   return id;
@@ -64,7 +75,8 @@ function skeleton(n = 3) {
   return `<div class="skeleton-wrap">${Array.from({ length: n }, () => '<div class="skeleton"></div>').join('')}</div>`;
 }
 function emptyState(msg, sub = '') { return `<div class="empty"><div class="empty-icon">○</div><b>${esc(msg)}</b>${sub ? `<p class="sub">${esc(sub)}</p>` : ''}</div>`; }
-function errorState(msg) { return `<div class="empty error"><div class="empty-icon">!</div><b>Không tải được dữ liệu</b><p class="sub">${esc(msg)}</p></div>`; }
+function errorState(msg) { return `<div class="empty error"><div class="empty-icon">!</div><b>Không tải được dữ liệu</b>
+  <p class="sub">${esc(msg)}</p><button class="ghost small" id="retry-load">Thử lại</button></div>`; }
 function statusPill(status) {
   const map = { active: ['ok', 'Active'], idle: ['warn', 'Idle'], offline: ['', 'Offline'], unknown: ['warn', 'Unknown'] };
   const [cls, label] = map[status] || map.unknown;
@@ -86,12 +98,55 @@ function shell(title) {
   return `<div class="wrap"><header class="topbar">
     <div class="brand"><span class="brand-mark">T</span><span><b>TikTunnel</b><small>Control panel</small></span></div>
     <div class="row"><span class="pill ok">${esc(title)}</span><span class="sub">${esc(me?.username || '')}</span>
+    <button class="ghost small" id="notif-btn" title="Thông báo">Notifications <span class="badge" id="notif-badge" hidden>0</span></button>
     <button class="ghost small" id="theme-toggle" title="Đổi chủ đề">${theme === 'light' ? 'Dark' : 'Light'}</button>
     <button class="ghost small" id="clear-cache" title="Tải lại không dùng cache">Reload</button>
-    <button class="ghost small" id="logout">Logout</button></div></header>
+    <button class="ghost small" id="logout">Logout</button></div>
+    <div class="notif-panel" id="notif-panel" hidden></div></header>
     <nav class="tabs" id="tabs"></nav><div id="panel"></div></div>`;
 }
+let notifTimer = null;
+let notifOutside = null;
+function notificationsHtml(d) {
+  const rows = d.items.map((n) => `<div class="notif-item ${n.read_at ? '' : 'unread'}">
+    <b>${esc(n.title)}</b><span class="sub">${esc(n.type)} · ${esc(n.ts.slice(5, 16))}</span>
+    <p>${esc(n.body)}</p></div>`).join('');
+  return `<div class="notif-head"><b>Thông báo</b><button class="ghost small" id="notif-read">Đã đọc tất cả</button></div>
+    ${rows || '<p class="sub">Chưa có thông báo.</p>'}`;
+}
+async function refreshNotifications() {
+  const badge = document.getElementById('notif-badge');
+  if (!badge) return;
+  try {
+    const d = await api('/api/notifications?limit=20');
+    badge.textContent = String(d.unread);
+    badge.hidden = d.unread === 0;
+    const panel = document.getElementById('notif-panel');
+    if (panel && !panel.hidden) {
+      panel.innerHTML = notificationsHtml(d);
+      const read = document.getElementById('notif-read');
+      if (read) read.onclick = async () => {
+        try { await api('/api/notifications/read', { method: 'POST', body: '{}' }); await refreshNotifications(); toast('Đã đánh dấu đã đọc'); }
+        catch (e) { toast(e.message); }
+      };
+    }
+  } catch {}
+}
 function bindShell() {
+  const notifBtn = document.getElementById('notif-btn');
+  const notifPanel = document.getElementById('notif-panel');
+  notifBtn.onclick = async () => {
+    notifPanel.hidden = !notifPanel.hidden;
+    if (!notifPanel.hidden) { notifPanel.innerHTML = skeleton(2); await refreshNotifications(); }
+  };
+  if (notifOutside) document.removeEventListener('click', notifOutside);
+  notifOutside = (e) => {
+    if (!notifPanel.hidden && !notifPanel.contains(e.target) && e.target !== notifBtn && !notifBtn.contains(e.target)) notifPanel.hidden = true;
+  };
+  document.addEventListener('click', notifOutside);
+  refreshNotifications();
+  clearInterval(notifTimer);
+  notifTimer = setInterval(refreshNotifications, 30000);
   document.getElementById('theme-toggle').onclick = () => {
     const next = document.documentElement.dataset.theme === 'light' ? 'dark' : 'light';
     localStorage.setItem('tiktunnel_theme', next); document.documentElement.dataset.theme = next;
@@ -114,10 +169,17 @@ function mount(title, builders, initial) {
     const panel = document.getElementById('panel');
     panel.innerHTML = skeleton();
     try {
-      const { html, after } = await builders[name]();
+      const { html, after } = await Promise.race([
+        builders[name](),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('request_timeout')), 12000))
+      ]);
       panel.innerHTML = html;
       if (after) after();
-    } catch (e) { panel.innerHTML = errorState(e.message); }
+    } catch (e) {
+      panel.innerHTML = errorState(e.message === 'request_timeout' ? 'Yêu cầu quá thời gian chờ' : e.message);
+      const retry = document.getElementById('retry-load');
+      if (retry) retry.onclick = () => show(name);
+    }
   }
   nav.querySelectorAll('button').forEach(b => b.onclick = () => show(b.dataset.tab));
   show(initial);
@@ -548,14 +610,20 @@ async function adminView() {
   mount('Admin', adminBuilders, 'Overview');
 }
 
-(async () => {
+async function boot() {
+  window.__tiktunnelBooted = true;
+  const btn = document.getElementById('boot-retry');
+  if (btn) btn.onclick = () => { root.innerHTML = '<div class="center"><div class="spinner"></div><p>Đang tải…</p></div>'; boot(); };
   try {
-    const r = await fetch('/api/auth/me');
+    const r = await timedFetch('/api/auth/me', { credentials: 'same-origin' }, 8000);
     if (!r.ok) return authScreen();
     me = await r.json();
     if (me.role === 'admin') return adminView();
     return friendView();
   } catch (e) {
-    root.innerHTML = `<div class="center"><h1>TikTunnel Control</h1><p class="sub">Không kết nối được API: ${esc(e.message)}</p></div>`;
+    root.innerHTML = `<div class="center"><span class="brand-mark">T</span><h1>TikTunnel Control</h1>
+      <p class="sub">Không kết nối được API: ${esc(e.message)}</p><button class="ghost" id="boot-retry">Thử lại</button></div>`;
+    document.getElementById('boot-retry').onclick = () => boot();
   }
-})();
+}
+boot();

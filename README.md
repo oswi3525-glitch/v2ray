@@ -2,7 +2,7 @@
 
 Rootless VPN control panel: admin + up to `MAX_USERS` friends, per-user quota from **real VPN traffic**, live data/speed dashboard, Device Activity, real Network Test, and one-tap Shadowrocket import. Node/Fastify + SQLite (`node:sqlite`) + sing-box VLESS-over-WebSocket.
 
-> **Trạng thái:** chạy ổn định local (E2E 34/34, Device Activity 7/7). Đường public Cloudcode/Cloudflare **chưa xác minh end-to-end**: WS upgrade qua HTTPS subdomain trả `404`, chưa có iPhone thật để test Shadowrocket. Xem `reports/cloudcode-audit.md` và `SHADOWROCKET_IMPORT.md`.
+> **Trạng thái:** chạy ổn định local (E2E 36/36, Device Activity 7/7). Đường public Cloudcode/Cloudflare **chưa xác minh end-to-end**: WS upgrade qua HTTPS subdomain trả `404`, chưa có iPhone thật để test Shadowrocket. Xem `reports/cloudcode-audit.md` và `SHADOWROCKET_IMPORT.md`.
 
 ## Yêu cầu
 
@@ -38,6 +38,7 @@ Startup command cho Pterodactyl/Cloudcode xem `INSTALL.md`.
 
 ## Tính năng chính
 
+- **Notifications:** bell trên header với badge chưa đọc, dropdown và "Đã đọc tất cả" (sự kiện quota/password/device/account).
 - **Admin:** Overview, User Management, Quota, Device Activity, Server Monitoring, Network Performance, Security Events, Settings.
 - **Friend:** Overview (GB + tốc độ live), Data Usage, Network Test (gauge + ping/jitter/loss/down/up), Active Devices, Shadowrocket import, Account Settings.
 - **Shadowrocket:** `GET /api/friend/import` xác thực session + quota + sing-box, trả `shadowrocket://add/<vless-uri>` và `sub://<base64(sub-url)>#remark`; copy/file/subscription làm fallback.
@@ -51,7 +52,7 @@ Xem `API.md`. Tóm tắt: `/api/auth/*`, `/api/admin/*`, `/api/friend/*`, `/api/
 ## Test
 
 ```bash
-npm test                              # E2E 34 checks
+npm test                              # E2E 36 checks
 node tests/device-activity-test.js    # Active → Idle → Offline (~70s)
 node tests/network-benchmark.js       # benchmark thật, ghi reports/runtime/
 npm audit --audit-level=low           # 0 vulnerabilities

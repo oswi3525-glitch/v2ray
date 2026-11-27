@@ -172,6 +172,10 @@ async function main() {
   await api(`/api/admin/users/${users[0].id}/quota`, { method: 'POST', cookie: admin.cookie, csrf: admin.csrf, body: { action: 'add', gb: 1 } });
   await api(`/api/admin/users/${users[0].id}/enable`, { method: 'POST', cookie: admin.cookie, csrf: admin.csrf });
   check('quota top-up restores account', cdb.getUser(users[0].id).exhausted === 0 && configUuids().includes(cdb.getVpnClient(users[0].id).uuid));
+  const notif = await api('/api/notifications?limit=20', { cookie: f1.cookie });
+  check('notifications delivered from real events', notif.status === 200 && notif.data.items.some((n) => n.type === 'quota') && notif.data.unread > 0);
+  const notifRead = await api('/api/notifications/read', { method: 'POST', cookie: f1.cookie, csrf: rot.data.csrf, body: {} });
+  check('notifications mark-as-read works', notifRead.status === 200 && notifRead.data.unread === 0);
 
   execFileSync('bash', [path.join(ROOT, 'scripts', 'restart.sh')], { cwd: ROOT, stdio: 'ignore' });
   await sleep(1500);

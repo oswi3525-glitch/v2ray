@@ -194,6 +194,26 @@ function migrate() {
       db.exec('COMMIT');
     } catch (e) { db.exec('ROLLBACK'); throw e; }
   }
+  if (!applied.has(4)) {
+    db.exec('BEGIN');
+    try {
+      db.exec(`
+        CREATE TABLE notifications (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id INTEGER NOT NULL DEFAULT 0,
+          role TEXT NOT NULL,
+          ts TEXT NOT NULL,
+          type TEXT NOT NULL,
+          title TEXT NOT NULL,
+          body TEXT NOT NULL DEFAULT '',
+          read_at TEXT
+        );
+        CREATE INDEX idx_notif_user ON notifications(user_id, id DESC);
+      `);
+      db.prepare('INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)').run(4, now());
+      db.exec('COMMIT');
+    } catch (e) { db.exec('ROLLBACK'); throw e; }
+  }
   return applied;
 }
 migrate();
@@ -281,6 +301,7 @@ function createFriend({ username, displayName, passwordHash, quotaBytes, expires
     db.prepare('INSERT INTO subscriptions (user_id, token, path, created_at) VALUES (?, ?, ?, ?)')
       .run(uid, subToken, `/vpn/${subToken}`, now());
     audit('admin', 'friend_created', username, 'quota=' + (quotaBytes || 0));
+    notify({ userId: 0, role: 'admin', type: 'account', title: 'Tài khoản mới', body: `Created ${username}` });
     db.exec('COMMIT');
     return getUser(uid);
   } catch (e) { db.exec('ROLLBACK'); throw e; }
@@ -457,6 +478,31 @@ function securityEvent(actor, action, target = '', ip = '', detail = '') {
 function securityEvents(limit = 100) {
   return db.prepare('SELECT * FROM security_events ORDER BY id DESC LIMIT ?').all(limit);
 }
+function notify({ userId = 0, role = 'friend', type = 'info', title = '', body = '' }) {
+  return db.prepare('INSERT INTO notifications (user_id,role,ts,type,title,body) VALUES (?,?,?,?,?,?)')
+    .run(Number(userId), String(role), now(), String(type), String(title).slice(0, 120), String(body).slice(0, 300)).lastInsertRowid;
+}
+function notifications(userId, role, limit = 20, offset = 0) {
+  const owner = role === 'admin' ? 0 : Number(userId);
+  return db.prepare('SELECT * FROM notifications WHERE user_id=? ORDER BY id DESC LIMIT ? OFFSET ?')
+    .all(owner, limit, offset);
+}
+function unreadCount(userId, role) {
+  const owner = role === 'admin' ? 0 : Number(userId);
+  return db.prepare('SELECT COUNT(*) AS c FROM notifications WHERE user_id=? AND read_at IS NULL').get(owner).c;
+}
+function markNotificationsRead(userId, role, id = null) {
+  const owner = role === 'admin' ? 0 : Number(userId);
+  if (id !== null && Number.isFinite(Number(id))) {
+    return db.prepare('UPDATE notifications SET read_at=? WHERE id=? AND user_id=?').run(now(), Number(id), owner).changes;
+  }
+  return db.prepare('UPDATE notifications SET read_at=? WHERE user_id=? AND read_at IS NULL').run(now(), owner).changes;
+}
+function purgeNotifications(keepPerUser = 200) {
+  db.prepare(`DELETE FROM notifications WHERE id IN (
+    SELECT id FROM (SELECT id, ROW_NUMBER() OVER (PARTITION BY user_id ORDER BY id DESC) AS rn FROM notifications) WHERE rn > ?
+  )`).run(keepPerUser);
+}
 
 module.exports = {
   ROOT, DB_PATH, db, now, audit, getSetting, setSetting,
@@ -466,5 +512,6 @@ module.exports = {
   recordTraffic, trafficHistory, openSession, getSession, deleteSession, purgeSessions,
   addMetric, metrics, activeVpnUsers, auditLogs,
   validDeviceId, upsertDevice, getDevice, touchDevice, addDeviceTraffic, setDeviceName, listDevices, adminDevices,
-  addSpeedTest, speedTests, adminSpeedTests, purgeSpeedTests, securityEvent, securityEvents
+  addSpeedTest, speedTests, adminSpeedTests, purgeSpeedTests, securityEvent, securityEvents,
+  notify, notifications, unreadCount, markNotificationsRead, purgeNotifications
 };

@@ -73,4 +73,4 @@ Ngày audit: 2026-11-27. Phạm vi: `control/server.js`, `control/db.js`, `web/*
 
 ## 8. Kết quả test bảo mật
 
-`npm test` 34/34 PASS, trong đó có RBAC, session rotation, security events. Brute-force/session expiry/CSRF được kiểm tra bằng script tích hợp trong E2E và script thủ công; chi tiết `reports/runtime/control-tests.json`.
+`npm test` 36/36 PASS, trong đó có RBAC, session rotation, security events, notifications. Brute-force/session expiry/CSRF được kiểm tra bằng script tích hợp trong E2E và script thủ công; chi tiết `reports/runtime/control-tests.json`.

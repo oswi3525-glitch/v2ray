@@ -1,5 +1,21 @@
 # CHANGELOG.md
 
+## 2.1.1 — Loading hang fix + notifications
+
+### Fixed
+- Boot/skeleton có thể treo vĩnh viễn: mọi API có `AbortController` timeout (9s, boot 8s), builder tab có timeout 12s, error state và boot đều có nút **Thử lại**; `web/boot-guard.js` thay spinner bằng thông báo lỗi sau 10s nếu app.js không chạy.
+- `/api/monitor/latency` đổi từ 8 probe tuần tự (tối đa 24s) sang 6 probe song song (1.5s) → admin Overview không chờ dài.
+- `crypto.randomUUID()` có fallback `getRandomValues` cho iOS cũ / non-secure context.
+- Route quota trả 400 do biến local `gb` che hàm `gb()`, làm mất notification; đã sửa.
+
+### Added
+- Notification system thật: bảng `notifications`, migration v4, bell + badge + dropdown trên header, refresh 30s, "Đã đọc tất cả".
+- Sự kiện: hết/quota thay đổi, mật khẩu đổi/reset, thiết bị VPN mới, tài khoản mới (admin). Giới hạn 200/user.
+- `GET /api/notifications`, `POST /api/notifications/read`.
+
+### Verification
+- `npm test`: 36/36 PASS (thêm 2 checks notifications).
+
 ## 2.1.0 — Major UX, Network & Security upgrade
 
 ### Added

@@ -40,7 +40,7 @@ Không áp dụng tham số "tuning" mù; mọi thay đổi đều có baseline/
 
 - Download/upload dùng `arrayBuffer` thật và ghi thời gian `performance.now()` ở client; server chỉ phát/ghi nhận byte, không trả số tốc độ giả.
 - Ping lấy 8 mẫu; timeout/lỗi đếm vào packet loss.
-- `npm test` 34/34 PASS; `tests/device-activity-test.js` 7/7 PASS (8 MiB qua sing-box thật).
+- `npm test` 36/36 PASS; `tests/device-activity-test.js` 7/7 PASS (8 MiB qua sing-box thật).
 
 ## 6. Blocker còn lại
 

@@ -155,6 +155,16 @@
     "detail": ""
   },
   {
+    "name": "notifications delivered from real events",
+    "status": "PASS",
+    "detail": ""
+  },
+  {
+    "name": "notifications mark-as-read works",
+    "status": "PASS",
+    "detail": ""
+  },
+  {
     "name": "recovery: backend restart, data kept",
     "status": "PASS",
     "detail": ""

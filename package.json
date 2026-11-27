@@ -1,6 +1,6 @@
 {
   "name": "tiktunnel-control",
-  "version": "2.0.0",
+  "version": "2.1.1",
   "private": true,
   "description": "Rootless TikTunnel Control: Fastify + SQLite + sing-box VLESS-WS, admin/friend dashboards and real-traffic quotas",
   "type": "commonjs",
