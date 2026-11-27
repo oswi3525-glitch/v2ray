@@ -11,3 +11,4 @@ backups/*
 tests/runtime/*
 *.pid
 .tmp*
+.env

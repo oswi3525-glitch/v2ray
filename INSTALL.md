@@ -13,7 +13,7 @@
 2. **Backup** — `./scripts/backup.sh`; the old port (8443 → 23952) and old DB are preserved in `backups/pre-cloudcode-*`.
 3. **Bootstrap** — `./scripts/bootstrap.sh` generates `config/secrets.env` (chmod 600) only if missing and installs npm dependencies (`fastify`, `bcryptjs`, `ws`).
 4. **sing-box** — official v1.14.5 `linux-amd64-musl` binary in `bin/sing-box`, sha256 pinned: `9cf4d31acb76696c64b4c3214854bc72a68c703482781ddd2158dbf95ab9d06a`.
-5. **Config** — `config/env` (`SERVER_HOST=vn-hn.cldcode.host`, `SERVER_PORT=23952`, `PROTOCOL=vless`, `MAX_USERS=3`) and `config/control.json` (app port, WS inbound port 23954, WS path `/vpn`, public HTTPS host, quota interval).
+5. **Config** — copy the sample with `cp .env.example config/env`, then edit `SERVER_HOST`, `SERVER_PORT`, `PROTOCOL`, `MAX_USERS`. Real environment variables override that file. `config/control.json` holds the app port, WS inbound port 23954, WS path `/vpn`, public HTTPS host and quota interval.
 6. **Start** — `./scripts/start.sh` starts sing-box (loopback WS inbound), the control app on 23952 and the watchdog.
 7. **First setup** — open the app, create the admin password. No default password exists. The legacy DB's 2 UUID/tokens can be imported with `node control/migrate-legacy.js` (passwords are NOT imported; admin must reset them).
 8. **Verify** — `./scripts/health-check.sh` and `node tests/control-test.js`.
