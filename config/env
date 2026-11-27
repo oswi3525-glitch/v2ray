@@ -1,0 +1,6 @@
+# Cloudcode TCP mapping (public port -> internal port expected to be 1:1).
+# Values can be overridden by real environment variables at launch time.
+SERVER_HOST=vn-hn.cldcode.host
+SERVER_PORT=23952
+PROTOCOL=vless
+MAX_USERS=3

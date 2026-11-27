@@ -9,9 +9,15 @@ umask 077
 tar -czf "$OUT" \
   -C "$ROOT" \
   config/settings.json \
+  config/env \
+  config/runtime.js \
+  config/control.json \
   config/secrets.env \
+  control \
+  web \
   config/sing-box.json \
   database/tiktunnel.db \
+  database/control.db \
   subscriptions \
   scripts \
   server \

@@ -1,15 +1,19 @@
 {
-  "name": "tiktunnel",
-  "version": "1.0.0",
+  "name": "tiktunnel-control",
+  "version": "2.0.0",
   "private": true,
-  "description": "Rootless VLESS VPN manager for up to 3 users (sing-box + Fastify + SQLite)",
+  "description": "Rootless TikTunnel Control: Fastify + SQLite + sing-box VLESS-WS, admin/friend dashboards and real-traffic quotas",
   "type": "commonjs",
   "scripts": {
-    "start": "node api/server.js",
-    "test": "node tests/run-tests.js"
+    "start": "node control/server.js",
+    "test": "node tests/control-test.js",
+    "test:performance": "node tests/control-performance.js",
+    "test:stability": "node tests/control-stability.js 120"
   },
   "dependencies": {
-    "fastify": "^5.6.0"
+    "fastify": "^5.6.0",
+    "bcryptjs": "^3.0.2",
+    "ws": "^8.18.3"
   },
   "engines": {
     "node": ">=22.5.0"

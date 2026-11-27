@@ -1,48 +1,30 @@
 # SECURITY.md
 
-## Current security posture (lab)
-
-| Control | Status |
+| Control | Implementation |
 |---|---|
-| No root / sudo / system config changes | enforced |
-| All runtime files under user-owned directory | enforced |
-| Admin API authentication | Bearer token, constant-time comparison (`crypto.timingSafeEqual`) |
-| Admin API exposure | bound to `127.0.0.1` only |
-| Subscription endpoint | public by design, token is a 192-bit random `base64url` value |
-| Rate limiting | 120 req/min public, 30 req/min admin, in-memory per IP |
-| Input validation | names `^[A-Za-z0-9 ._-]{1,32}$`, ISO expiry, integer IDs, token regex |
-| Max accounts | 3 active, hard cap |
-| Secrets in logs | API logger disabled; audit events store only IDs/names; no UUID/token/key in logs |
-| Secret files | `config/secrets.env`, `config/sing-box.json`, DB, subscriptions are chmod 600 and gitignored |
-| Backup protection | archives created with umask 077 and chmod 600 |
-| **VLESS transport security** | **NONE (`security=none`) — lab only. Traffic is unencrypted and unauthenticated on the wire beyond the UUID.** |
-| TLS / REALITY | not deployable here (no domain/cert, no transparent inbound TCP) |
+| Password hashing | bcryptjs cost 12 (`admins`, `users`); no plaintext column |
+| Session | random 256-bit id, DB-backed, expiry 2 h admin / 12 h friend, HttpOnly + SameSite=Strict cookie (`Secure` when `cookie_secure=true`) |
+| CSRF | double-submit token returned by login/setup, required as `x-csrf-token` on all admin writes |
+| RBAC | `/api/admin/*` admin only; `/api/friend/*` friend only; friend cannot read other user records |
+| Login abuse | 10 attempts / 5 min / IP, generic error, audit on failure |
+| General rate limit | 180 requests/min/IP on `/api/*` |
+| Input validation | username regex, password length/complexity, quota range, expiry parsing, token regex by DB lookup |
+| Headers | `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, strict-ish CSP |
+| Subscription | 192-bit random token; WS path contains that token; revoked/exhausted → 404 and socket destroyed |
+| Secrets | `config/secrets.env` chmod 600 and gitignored; no UUID/token/password in logs or reports |
+| TLS | terminated at Cloudflare; no fake TLS, no disabled verification |
+| Audit | account, quota, password, login and enforcement events in `audit_logs` |
 
-## Handling secrets
+## Deployment checklist
 
-```bash
-TOKEN="$(sed -n 's/^TIKTUNNEL_ADMIN_TOKEN=//p' config/secrets.env)"
-```
+1. Set `cookie_secure: true` once behind HTTPS.
+2. Confirm Cloudcode's policy for operating a private VPN before exposing the service.
+3. Keep the app port authenticated; never expose an unauthenticated admin API.
+4. Rotate admin/friend passwords after first setup and after restoring backups.
+5. Back up `database/control.db` before any VPN config change.
 
-Never paste the token, a UUID or a subscription URI into a shell command that echoes it, into logs, or into git. The test suite deliberately avoids printing them.
+## Known gaps
 
-If the admin token is suspected leaked: edit `config/secrets.env`, set a new random value (`python3 -c 'import secrets;print(secrets.token_urlsafe(32))'`), then `./scripts/health-check.sh`. No service restart is required for the API to pick it up **only if** the API is restarted — run `./scripts/restart.sh`.
-
-## Admin API separation
-
-`/health` and `/api/sub/:token` are the only unauthenticated endpoints. All other `/api/*` routes require the admin bearer token. Do not expose port 3000 beyond loopback. If a public API is ever required, put it behind an authenticating reverse proxy with TLS; never remove the bearer check.
-
-## Abuse considerations
-
-- The service does not attempt to bypass ISP billing, TikTok zero-rating, or any provider policy. See [`reports/viettel-network-test.md`](reports/viettel-network-test.md).
-- No TUN interface, no packet injection, no firewall rules, no routing table changes.
-- Revoked users are removed from the server config immediately, so their UUID cannot establish a new session.
-
-## Hardening before real-world use
-
-1. Move to a host with a public IP and open inbound port.
-2. Enable TLS with a valid certificate (or verified REALITY support on Shadowrocket).
-3. Keep `api_host=127.0.0.1`.
-4. Rotate the admin token and all subscription tokens.
-5. Set `expires_at` on every account and review active accounts regularly.
-6. Verify logs stay bounded (`scripts/common.sh` rotates any log over 5 MiB).
+- The local build was tested over plain HTTP, so cookie `Secure` is off locally.
+- No external device test; TLS/SNI behavior through Cloudcode is not proven.
+- CSRF token lives in `sessionStorage`; consider a non-CDN-hosted Chart.js build if you require a stricter CSP.

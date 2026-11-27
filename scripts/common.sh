@@ -31,7 +31,7 @@ sb_pids() {
 }
 
 api_pids() {
-  pgrep -f "node $ROOT/api/server.js" 2>/dev/null || true
+  pgrep -f "node $ROOT/control/server.js" 2>/dev/null || true
 }
 
 rotate_logs() {

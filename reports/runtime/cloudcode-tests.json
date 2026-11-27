@@ -1,0 +1,155 @@
+{
+  "results": [
+    {
+      "name": "3 named accounts active",
+      "status": "PASS",
+      "detail": "3 active"
+    },
+    {
+      "name": "config uses Cloudcode host",
+      "status": "PASS",
+      "detail": "vn-hn.cldcode.host"
+    },
+    {
+      "name": "config uses TCP 23952",
+      "status": "PASS",
+      "detail": "23952"
+    },
+    {
+      "name": "protocol vless / max 3",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "name": "DNS resolves server host",
+      "status": "PASS",
+      "detail": "117.5.211.146"
+    },
+    {
+      "name": "local TCP 23952 listening",
+      "status": "PASS",
+      "detail": "2ms"
+    },
+    {
+      "name": "external TCP to Cloudcode 23952",
+      "status": "FAIL",
+      "detail": "ECONNREFUSED"
+    },
+    {
+      "name": "HTTPS subdomain TCP 443",
+      "status": "PASS",
+      "detail": "4ms"
+    },
+    {
+      "name": "Cloudcode port-mapping mechanism",
+      "status": "SKIP",
+      "detail": "no Cloudcode CLI/agent/env available in this workspace"
+    },
+    {
+      "name": "Shadowrocket iOS import/connect/reconnect",
+      "status": "SKIP",
+      "detail": "no iOS device; public TCP 23952 refused from here"
+    },
+    {
+      "name": "sing-box config valid",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "name": "sing-box running exactly once",
+      "status": "PASS",
+      "detail": "1"
+    },
+    {
+      "name": "1 VLESS client(s) start",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "name": "1 client(s) download through VLESS",
+      "status": "PASS",
+      "detail": "2684.35 Mbit/s aggregate"
+    },
+    {
+      "name": "1 client(s) upload through VLESS",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "name": "2 VLESS client(s) start",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "name": "2 client(s) download through VLESS",
+      "status": "PASS",
+      "detail": "2581.11 Mbit/s aggregate"
+    },
+    {
+      "name": "2 client(s) upload through VLESS",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "name": "3 VLESS client(s) start",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "name": "3 client(s) download through VLESS",
+      "status": "PASS",
+      "detail": "3412.32 Mbit/s aggregate"
+    },
+    {
+      "name": "3 client(s) upload through VLESS",
+      "status": "PASS",
+      "detail": ""
+    }
+  ],
+  "metrics": {
+    "clients_1": {
+      "all_ok": true,
+      "aggregate_mbit_s": 2684.35,
+      "latency_ms": [
+        24
+      ],
+      "cpu_pct": 80,
+      "server_rss_kb": [
+        52764,
+        54460
+      ],
+      "upload_ok": true
+    },
+    "clients_2": {
+      "all_ok": true,
+      "aggregate_mbit_s": 2581.11,
+      "latency_ms": [
+        27,
+        25
+      ],
+      "cpu_pct": 100,
+      "server_rss_kb": [
+        54480,
+        55620
+      ],
+      "upload_ok": true
+    },
+    "clients_3": {
+      "all_ok": true,
+      "aggregate_mbit_s": 3412.32,
+      "latency_ms": [
+        19,
+        17,
+        23
+      ],
+      "cpu_pct": 83.33,
+      "server_rss_kb": [
+        55624,
+        56280
+      ],
+      "upload_ok": true
+    },
+    "local_connect_loss_pct": 0,
+    "disconnects": 0
+  }
+}

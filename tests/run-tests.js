@@ -10,10 +10,10 @@ const { spawn, spawnSync, execFileSync } = require('node:child_process');
 
 const db = require('../api/db');
 const { ROOT } = db;
-const settings = JSON.parse(fs.readFileSync(path.join(ROOT, 'config', 'settings.json'), 'utf8'));
+const cfgEnv = require('../config/runtime');
 const SECRETS = fs.readFileSync(path.join(ROOT, 'config', 'secrets.env'), 'utf8');
 const ADMIN = SECRETS.match(/TIKTUNNEL_ADMIN_TOKEN=(.*)/)[1].trim();
-const API = `http://127.0.0.1:${settings.api_port}`;
+const API = `http://127.0.0.1:${cfgEnv.apiPort}`;
 const RUNTIME = path.join(ROOT, 'tests', 'runtime');
 fs.mkdirSync(RUNTIME, { recursive: true });
 
@@ -92,7 +92,7 @@ function writeClientConfig(idx, user) {
         type: 'vless',
         tag: 'proxy',
         server: '127.0.0.1',
-        server_port: Number(settings.listen_port),
+        server_port: cfgEnv.serverPort,
         uuid: user.uuid,
         flow: ''
       }
@@ -164,7 +164,7 @@ async function main() {
   const st = await api('GET', '/api/status');
   check('API /api/status (admin)', st.status === 200 && st.data?.sing_box === 'running');
   check('SQLite readable', Array.isArray(db.listUsers()));
-  check('sing-box port listening', await waitPort(Number(settings.listen_port), 10));
+  check('sing-box port listening', await waitPort(cfgEnv.serverPort, 10));
   skip('TLS certificate valid', 'no user-owned domain/cert; platform terminates TLS');
   skip('REALITY handshake', 'no transparent inbound TCP; Shadowrocket compatibility unverified');
 

@@ -1,0 +1,51 @@
+{
+  "measured_at": "2026-11-27T11:16:13.260Z",
+  "results": {
+    "idle": {
+      "singbox_rss_kb": 53324,
+      "api_rss_kb": 81112
+    },
+    "dns": "117.5.211.146",
+    "external_tcp_23952": {
+      "ok": false,
+      "err": "ECONNREFUSED"
+    },
+    "https_subdomain_443": {
+      "ok": true,
+      "ms": 17
+    },
+    "probes": {
+      "1.1.1.1:443": {
+        "ok": true,
+        "ms": 2
+      },
+      "8.8.8.8:443": {
+        "ok": true,
+        "ms": 2
+      },
+      "app-medium-1-ac2e.cldcode.host:443": {
+        "ok": true,
+        "ms": 2
+      }
+    },
+    "clients_1": {
+      "all_ok": true,
+      "aggregate_mbit_s": 1001.62,
+      "latency_ms": [
+        67
+      ],
+      "cpu_pct": 85.71,
+      "rss_delta_kb": 1196
+    },
+    "clients_2": {
+      "all_ok": true,
+      "aggregate_mbit_s": 979.69,
+      "latency_ms": [
+        82,
+        55
+      ],
+      "cpu_pct": 92.31,
+      "rss_delta_kb": 180
+    }
+  }
+}

@@ -16,11 +16,11 @@ check() {
 
 check 'sing-box process' bash -c 'test -n "$(pgrep -f "'"$ROOT"'/bin/sing-box run" 2>/dev/null)"'
 check 'sing-box config' "$ROOT/bin/sing-box" check -c "$ROOT/config/sing-box.json"
-PORT="$(node -p "require('$ROOT/config/settings.json').listen_port")"
-APORT="$(node -p "require('$ROOT/config/settings.json').api_port")"
+PORT="$(node -p "require('$ROOT/config/control.json').singbox_ws_port")"
+APORT="$(node -p "require('$ROOT/config/runtime.js').serverPort")"
 check "port $PORT listening" bash -c "python3 -c 'import socket,sys; s=socket.create_connection((\"127.0.0.1\",$PORT),1); s.close()'"
-check "api $PORT health" curl -fsS -m 3 "http://127.0.0.1:${APORT}/health"
-check 'sqlite readable' node -e "require('$ROOT/api/db').listUsers()"
+check "api $APORT health" curl -fsS -m 3 "http://127.0.0.1:${APORT}/health"
+check 'sqlite readable' node -e "require('$ROOT/control/db').listUsers()"
 
 printf '[%s] health-check failures=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$fail" >> "$ROOT/logs/health-check.log"
 rotate_logs

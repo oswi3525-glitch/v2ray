@@ -1,0 +1,15 @@
+{
+  "duration_s": 305,
+  "samples": 30,
+  "sb_rss_start_kb": 56984,
+  "sb_rss_end_kb": 52468,
+  "api_rss_start_kb": 78036,
+  "api_rss_end_kb": 76396,
+  "cpu_avg_pct": 23.26,
+  "cpu_max_pct": 38.56,
+  "transfers_ok": 6,
+  "transfers_fail": 84,
+  "restart_recovery": "PASS",
+  "completed_30_min": false,
+  "reason": "local-only; no Cloudcode access and public TCP 23952 refused"
+}

@@ -1,69 +1,26 @@
 # INSTALL.md
 
-## Prerequisites (verified on this machine)
+## Prerequisites
 
-- Ubuntu 24.04 (or compatible), x86_64, ordinary unprivileged user with a writable home.
-- Node.js ≥ 22.5 (for built-in `node:sqlite`), npm, Python 3, curl, tar, openssl.
-- Outbound Internet access to GitHub releases and npm registry.
-- A writable project directory (here `$HOME/TikTunnel` → `/workspaces/v2ray`).
-
-Not required / not used: root, sudo, systemd, Docker, tmux, screen.
+- Ubuntu 24.04-like Linux, unprivileged user with writable home.
+- Node.js ≥ 22.5 (built-in `node:sqlite`), npm, Python 3, curl, tar, openssl.
+- Outbound Internet to GitHub releases / npm registry.
+- No root, no sudo, no Docker, no systemd.
 
 ## Steps
 
-1. **Audit first** (do not skip):
+1. **Audit first** — `reports/cloudcode-audit.md` documents the live checks. Do not assume Cloudcode forwards TCP 23952 or that the HTTPS subdomain forwards WS.
+2. **Backup** — `./scripts/backup.sh`; the old port (8443 → 23952) and old DB are preserved in `backups/pre-cloudcode-*`.
+3. **Bootstrap** — `./scripts/bootstrap.sh` generates `config/secrets.env` (chmod 600) only if missing and installs npm dependencies (`fastify`, `bcryptjs`, `ws`).
+4. **sing-box** — official v1.14.5 `linux-amd64-musl` binary in `bin/sing-box`, sha256 pinned: `9cf4d31acb76696c64b4c3214854bc72a68c703482781ddd2158dbf95ab9d06a`.
+5. **Config** — `config/env` (`SERVER_HOST=vn-hn.cldcode.host`, `SERVER_PORT=23952`, `PROTOCOL=vless`, `MAX_USERS=3`) and `config/control.json` (app port, WS inbound port 23954, WS path `/vpn`, public HTTPS host, quota interval).
+6. **Start** — `./scripts/start.sh` starts sing-box (loopback WS inbound), the control app on 23952 and the watchdog.
+7. **First setup** — open the app, create the admin password. No default password exists. The legacy DB's 2 UUID/tokens can be imported with `node control/migrate-legacy.js` (passwords are NOT imported; admin must reset them).
+8. **Verify** — `./scripts/health-check.sh` and `node tests/control-test.js`.
 
-   ```bash
-   # Inspect OS, user, tools, ports, DNS, connectivity, inbound reachability
-   # The completed report is reports/vps-audit.md
-   ```
+## Cloudcode deployment notes
 
-2. **Install sing-box** into `bin/` from the official GitHub release. Verify architecture (`uname -m` → x86_64 → `linux-amd64-musl`), confirm the static binary with `ldd`, pin its SHA-256 and check `sing-box version`. Record:
-
-   ```
-   sing-box 1.14.5
-   sha256 9cf4d31acb76696c64b4c3214854bc72a68c703482781ddd2158dbf95ab9d06a
-   ```
-
-   Upstream publishes no checksum/signature asset for this release, so integrity relies on HTTPS transfer plus the locally recorded pin. Re-verify on every upgrade.
-
-3. **Bootstrap**:
-
-   ```bash
-   cd "$HOME/TikTunnel"
-   ./scripts/bootstrap.sh
-   ```
-
-   This generates `config/secrets.env` (chmod 600) **only if absent**, installs npm dependencies, renders `config/sing-box.json` and validates it. Existing secrets/data are never overwritten.
-
-4. **Start**:
-
-   ```bash
-   ./scripts/start.sh
-   ./scripts/status.sh
-   ./scripts/health-check.sh
-   ```
-
-5. **Create accounts** via the admin API (see README) and export subscriptions.
-
-6. **Test**:
-
-   ```bash
-   npm test
-   ```
-
-## Notes for this specific environment
-
-- `systemctl` exists but is a container stub: `systemd is not running in this container`. `systemd --user` is unavailable, so `setsid`/`nohup` plus a watchdog are used.
-- tmux/screen are not installed, hence no terminal multiplexer is required.
-- Port 8443 was free and can be bound by the user. The Codespaces public port URL requires GitHub authentication and is not a raw TCP tunnel; inbound VLESS is therefore not reachable.
-- Auto-start after VPS reboot is **not available** on this platform. On a normal VPS, set `@reboot /home/<user>/TikTunnel/scripts/start.sh` in the user crontab (no root needed) after confirming cron is available.
-
-## Uninstall (manual)
-
-```bash
-./scripts/stop.sh
-rm -rf "$HOME/TikTunnel" "$HOME/TikTunnel"   # remove symlink only after verifying path
-```
-
-Back up `database/`, `config/` and `subscriptions/` first.
+- If Cloudcode requires a different internal port mapping, change `app_port` in `config/control.json` / `SERVER_PORT` in `config/env` — do not invent a new public port.
+- If Cloudcode terminates TLS on the HTTPS subdomain, keep `server/render-control-config.js` plaintext WS on loopback and set `cookie_secure: true` in `config/control.json`.
+- If WS forwarding is unavailable, set `vpn_mode: tcp` (sing-box binds the app port directly) and host the web panel elsewhere; this has NOT been verified in this environment.
+- Persistent process recovery: watchdog + `setsid/nohup`. Systemd/cron auto-start cannot be assumed on Cloudcode; configure whatever persistence the provider actually offers.

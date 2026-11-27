@@ -4,8 +4,8 @@
 set -u
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
-PORT="$(node -p "require('$ROOT/config/settings.json').listen_port")"
-APORT="$(node -p "require('$ROOT/config/settings.json').api_port")"
+PORT="$(node -p "require('$ROOT/config/control.json').singbox_ws_port")"
+APORT="$(node -p "require('$ROOT/config/runtime.js').serverPort")"
 SB_FAIL=0
 API_FAIL=0
 
@@ -53,7 +53,7 @@ while true; do
 
   if [ "$API_FAIL" -ge 2 ]; then
     printf '[%s] watchdog: api down (%s checks), restarting\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$API_FAIL" >> "$ROOT/logs/watchdog.log"
-    setsid nohup node "$ROOT/api/server.js" >> "$ROOT/logs/api.log" 2>&1 < /dev/null &
+    setsid nohup node "$ROOT/control/server.js" >> "$ROOT/logs/api.log" 2>&1 < /dev/null &
     echo $! > "$API_PID"
     API_FAIL=0
   fi

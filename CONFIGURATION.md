@@ -4,34 +4,46 @@
 
 | File | Purpose | Sensitivity |
 |---|---|---|
-| `config/settings.json` | public/non-secret deployment settings | low |
+| `config/env` | Cloudcode env vars: `SERVER_HOST`, `SERVER_PORT`, `PROTOCOL`, `MAX_USERS` | low |
+| `config/settings.json` | non-env settings (bind host, API, security, transport) | low |
+| `config/runtime.js` | merges `config/env`, real env vars and `settings.json` | low |
 | `config/secrets.env` | admin API token | **secret**, chmod 600, gitignored |
 | `config/sing-box.json` | generated server config with user UUIDs | sensitive, chmod 600, gitignored |
 | `database/tiktunnel.db` | accounts, subscription tokens, audit events | sensitive, gitignored |
 | `subscriptions/*.txt` | base64 VLESS URIs, filename is SHA-256 prefix of token | sensitive, chmod 600 |
+
+## `config/env` (Cloudcode mapping)
+
+```sh
+SERVER_HOST=vn-hn.cldcode.host
+SERVER_PORT=23952
+PROTOCOL=vless
+MAX_USERS=3
+```
+
+- `SERVER_HOST`: the address written into every VLESS subscription URI.
+- `SERVER_PORT`: public TCP port allocated by Cloudcode. The listener uses this same number as the internal port until Cloudcode documents a different mapping. Real environment variables override this file.
+- `MAX_USERS`: hard cap on active accounts (revoked/expired ones do not count).
+- `PROTOCOL`: kept explicit for documentation/validation; the implemented inbound is VLESS.
 
 ## `config/settings.json`
 
 ```json
 {
   "listen_host": "0.0.0.0",
-  "listen_port": 8443,
   "api_host": "127.0.0.1",
   "api_port": 3000,
-  "max_users": 3,
-  "public_host": "127.0.0.1",
   "security": "none",
   "sni": "",
   "transport": "tcp",
   "flow": "",
-  "mode": "lab-local-only"
+  "mode": "cloudcode-tcp-unverified"
 }
 ```
 
-- `listen_port`: VLESS port. Must be free and reachable from clients.
+- `listen_host`: `0.0.0.0` so the Cloudcode port mapper can reach the process.
 - `api_host`: keep `127.0.0.1` — the admin API must never be exposed publicly.
-- `max_users`: hard cap on simultaneously active accounts (revoked/expired ones do not count).
-- `public_host` / `security` / `sni` / `flow`: used only when building VLESS URIs for subscriptions. They do **not** enable TLS by themselves.
+- `security` / `sni` / `flow`: used only when building VLESS URIs and server TLS config. They do **not** enable TLS by themselves. `none` is currently retained because TLS on port 23952 could not be verified (see migration report).
 
 After editing settings, run:
 
@@ -56,7 +68,7 @@ node subscriptions/render.js
 3. Set in `config/settings.json`:
 
    ```json
-   "public_host": "vpn.example.com",
+   "SERVER_HOST": "vpn.example.com",
    "security": "tls",
    "sni": "vpn.example.com",
    "flow": "xtls-rprx-vision",

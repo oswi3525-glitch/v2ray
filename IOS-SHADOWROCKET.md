@@ -1,7 +1,7 @@
 #IOS / Shadowrocket — Subscription Import
 
 **Current status:** the generated subscription is a standard VLESS URI but it is configured as
-`security=none` with `public_host=127.0.0.1`. It is intended for local testing only and **will not work from a phone**. Do not treat it as a usable VPN until TLS/REALITY and a reachable public host are configured (see CONFIGURATION.md).
+`security=none` with address `vn-hn.cldcode.host`, port `23952`. Public TCP 23952 was refused when tested from outside Cloudcode, and TLS was not verifiable, so **this subscription is not yet usable from a phone**. Do not treat it as a working VPN until Cloudcode forwarding is verified and TLS/REALITY is enabled (see CONFIGURATION.md and reports/cloudcode-migration.md).
 
 ## Get your subscription URL
 
@@ -22,7 +22,7 @@ The endpoint returns base64 by default (standard subscription format). `?raw=1` 
 3. If using a subscription URL: tap the **Subscribe** / group icon, choose **Add Subscription**, paste the full `/api/sub/<token>` URL, set the remark, and tap **Done**. Then open the subscription group and select a node.
 4. If using the raw URI: choose **Import from Clipboard** / paste into the link field; Shadowrocket will fill UUID, address, port and network settings automatically.
 5. Verify fields:
-   - Address = your server host (a domain when TLS is enabled)
+   - Address = vn-hn.cldcode.host
    - Port = 8443
    - UUID = your personal UUID (never share it)
    - Network = TCP

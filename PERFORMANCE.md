@@ -1,33 +1,24 @@
-# PERFORMANCE
+# PERFORMANCE.md
 
-Full measured data: [`reports/performance-test.md`](reports/performance-test.md). Raw samples: `reports/runtime/stability-20min-summary.json`, `reports/runtime/stability-smoke-120s.csv`, `reports/runtime/network-lab.json`.
+Measured values only; raw data in `reports/runtime/control-performance.json` and `reports/runtime/control-stability.json`.
 
-## Key numbers (measured, not estimated)
+| Scenario | CPU | RAM | Throughput | Latency |
+|---|---|---|---|---|
+| Idle | — | sing-box ~53 MB, API ~81 MB | — | — |
+| 1 WS VLESS client, 8 MiB | 85.71% | +1.2 MB | 1001.62 Mbit/s | 67 ms |
+| 2 WS VLESS clients, 16 MiB | 92.31% | +0.18 MB | 979.69 Mbit/s | 55–82 ms |
+| 126 s stability, 2 clients | avg 30.33% | stable | 24/24 transfers OK | — |
 
-| Scenario | Result |
-|---|---|
-| Idle sing-box RSS | ~54 MB |
-| Idle API RSS | ~77 MB |
-| 1 client, 8 MiB local transfer | 24–45 ms |
-| 3 clients in parallel, 24 MiB total | ~0.075–0.08 s, **2,516–2,684 Mbit/s** |
-| CPU during 3-client burst | ~80–87% (short spike on 2 vCPU) |
-| RSS increase under load | +~600 kB |
-| Direct Internet download (5 MB, Cloudflare) | 53.0 MB/s (~424 Mbit/s), TTFB 61 ms |
-| Via VLESS (same host client/server) | 59.5 MB/s (~476 Mbit/s), TTFB 63 ms |
-| TCP connect latency | 1.9–3.4 ms, 0% connect failures |
-| 20-min stability | 357/357 transfers OK, 0 failures; RSS growth +4.7 MB then plateau; CPU avg 22.1% |
-| Service restart | recovery PASS after client reconnect |
+These are **loopback** benchmarks on a 2-vCPU host. They prove the proxy pipeline and give an upper bound; they are not Internet speeds and not a substitute for external client tests.
+
+## Latency target
+
+The desired target is <100 ms, but it is not guaranteed and not claimed for the public path. Only TCP-connect probes from this host were measured; they do not represent latency from an iPhone/Viettel client to arbitrary websites. `GET /api/monitor/network` shows each endpoint and its measured result with an explicit caveat.
 
 ## Tuning decisions
 
-- Minimum features: VLESS TCP only, no TUN, no rule sets/geoip/sniffing/fake-IP/multiplex.
-- DNS via `local` resolver; routing `final=direct`.
-- `warn` logging plus script-level rotation at 5 MiB; API logger disabled.
-- No artificial bandwidth cap — measurements showed no bottleneck requiring one.
-- API bound to loopback so it cannot compete with the VPN on the public interface.
-
-## Not measured / caveats
-
-- Three VLESS clients are real protocol clients but share one host; they are not three independent remote devices.
-- No Internet-inbound path, no iOS client, no Viettel SIM: remote throughput, handover, device DNS-leak and Viettel comparisons are blocked.
-- The requested 30-minute stability run was stopped at 20 minutes at the user's request; the 30-minute criterion is not claimed.
+- No TUN, Docker, rule sets, geoip/sniffing or multiplexing.
+- One public port for the app; sing-box on loopback only.
+- `local` DNS resolver; `warn`-level logs with 5 MiB rotation.
+- No artificial bandwidth cap (benchmarks show no need).
+- Quota worker interval 10 s; documented overshoot rather than a false "hard cap" claim.

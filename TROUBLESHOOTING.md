@@ -1,47 +1,32 @@
 # TROUBLESHOOTING.md
 
-Follow this order; do not repeat a failed fix more than three times without changing approach.
+Follow this order; never reapply the same failed fix three times without changing approach.
 
-1. **Read logs** (no secrets are written to them):
+1. Read `logs/api.log`, `logs/sing-box-stdout.log`, `logs/watchdog.log`, `logs/manage.log`, `logs/health-check.log`. No UUID/token/password is written there.
+2. `./scripts/status.sh` and `./scripts/health-check.sh`.
+3. `bin/sing-box check -c config/sing-box.json`. On failure restore `backups/sing-box.last.json`, fix, re-render with `node server/render-control-config.js`.
+4. `./scripts/backup.sh` before edits.
+5. `./scripts/restart.sh`, then rerun the specific test (`node tests/control-test.js`).
 
-   ```bash
-   tail -50 logs/api.log
-   tail -50 logs/sing-box-stdout.log
-   tail -50 logs/manage.log
-   tail -50 logs/health-check.log
-   tail -50 logs/watchdog.log
-   ```
+## Symptoms
 
-2. **Check state**: `./scripts/status.sh` and `./scripts/health-check.sh`.
+| Symptom | Cause / fix |
+|---|---|
+| Admin page shows "Create Administrator" repeatedly | `config/secrets` / DB path mismatch; verify `database/control.db` exists and is writable; `adminExists()` must be true after setup |
+| Friend cannot log in | password not set on imported account (legacy users have no password) — admin must use **Reset password** |
+| Friend login blocked after attempts | rate limit 10/5 min; wait or use another IP |
+| Admin POST returns 401 | missing `x-csrf-token`; log in again to get a fresh CSRF token |
+| Friend API returns 401 | friend session expired (12 h) or admin endpoint attempted |
+| WS proxy drops immediately | subscription token missing/exhausted/revoked or `config/control.json` `vpn_mode` not `ws`; check `/api/friend/vpn` |
+| VLESS client gets EOF | ensure client path equals `/vpn/<token>` from `/api/friend/subscription`; queue buffers were added for upstreamopen races |
+| Quota not enforced yet | worker interval is 10 s; check `audit_logs` for `quota_exhausted`, then re-enable/top up |
+| Public URL returns Cloudflare 404 | Cloudcode tunnel not forwarding `/vpn` or the app port; platform-side fix required |
+| TCP 23952 refused | Cloudcode port mapping not active; no local fix is possible without platform access |
+| Watchdog restart churn | `logs/applying.lock` should suppress checks during config changes; verify lock is removed after a failed apply |
 
-3. **Validate config**: `bin/sing-box check -c config/sing-box.json`. On failure, restore the previous config from `backups/sing-box.last.json`, investigate, then re-render from DB with `node server/render-config.js`.
+## Limits that cannot be fixed here
 
-4. **Back up before editing**: `./scripts/backup.sh`.
-
-5. **Apply fix**: edit only the intended file; keep secrets chmod 600.
-
-6. **Restart and retest**: `./scripts/restart.sh && ./scripts/health-check.sh && npm test`.
-
-7. Mark PASS only after the specific test succeeds again.
-
-## Common symptoms
-
-| Symptom | Likely cause | Fix |
-|---|---|---|
-| `sing-box failed to bind port` | another process owns 8443 | `ss -tulnp \| grep 8443`; stop the owner or change `listen_port` in settings and re-apply |
-| API returns 401 | wrong/missing bearer token | read token from `config/secrets.env`; it is never printed by scripts |
-| `active_user_limit_reached` | 3 active accounts exist | revoke/expire one, then retry |
-| Subscription is empty | token belongs to revoked/expired/disabled user | check `GET /api/users` (admin) |
-| Config valid but clients cannot connect | security is `none` + host is `127.0.0.1` (lab) or inbound not reachable | this is expected here; see audit report. On a real VPS, enable TLS/REALITY and set the public host |
-| Client cannot reconnect right after a server restart | test clients cache the old outbound connection | restart the client (Shadowrocket reconnect); server-side recovery itself is verified by the stability test |
-| Memory grows slowly | log files or rate-limit buckets | logs are rotated at 5 MiB; buckets are pruned; restart API to clear buckets |
-| Watchdog keeps restarting services | port conflict or missing config | disable watchdog temporarily: `kill $(cat logs/watchdog.pid)`; fix root cause; run `./scripts/start.sh` |
-| Cannot auto-start after reboot | platform has no systemd/cron user support | on a real VPS use a user crontab `@reboot` entry; on Codespaces it must be started manually |
-
-## Limits that cannot be fixed in this environment
-
-- Inbound raw TCP from the Internet is blocked by the Codespaces HTTP tunnel (GitHub auth + TLS termination). This is a platform constraint, not a configuration bug.
-- No domain/certificate → no valid TLS; no transparent TCP → no REALITY validation.
-- No iOS device → Shadowrocket import, Wi-Fi↔4G/5G handover and client DNS-leak tests cannot be executed.
-
-These are reported as SKIP/BLOCKED, never as PASS.
+- No Cloudcode shell/port mapping control from this workspace.
+- Public TCP/WS path not verified.
+- No iOS device for Shadowrocket tests.
+- 30-minute external stability test not run; local smoke only.

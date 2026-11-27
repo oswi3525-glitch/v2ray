@@ -4,10 +4,10 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { ROOT, listActiveUsers } = require('../api/db');
 
-const settings = JSON.parse(fs.readFileSync(path.join(ROOT, 'config', 'settings.json'), 'utf8'));
+const cfgEnv = require('../config/runtime');
 
 const users = listActiveUsers().map((u) => {
-  const entry = { uuid: u.uuid, flow: settings.flow || '' };
+  const entry = { uuid: u.uuid, flow: cfgEnv.flow || '' };
   return entry;
 });
 
@@ -24,8 +24,8 @@ const cfg = {
     {
       type: 'vless',
       tag: 'vless-in',
-      listen: settings.listen_host,
-      listen_port: Number(settings.listen_port),
+      listen: cfgEnv.listenHost,
+      listen_port: cfgEnv.serverPort,
       users
     }
   ],

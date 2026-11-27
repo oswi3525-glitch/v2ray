@@ -1,0 +1,122 @@
+[
+  {
+    "name": "admin first setup / login",
+    "status": "PASS",
+    "detail": "http=200"
+  },
+  {
+    "name": "admin session valid",
+    "status": "PASS",
+    "detail": ""
+  },
+  {
+    "name": "third friend rejected (max 2)",
+    "status": "PASS",
+    "detail": ""
+  },
+  {
+    "name": "two friends exist",
+    "status": "PASS",
+    "detail": "2"
+  },
+  {
+    "name": "UUIDs unique",
+    "status": "PASS",
+    "detail": ""
+  },
+  {
+    "name": "password set for tiktunnel-user-01",
+    "status": "PASS",
+    "detail": ""
+  },
+  {
+    "name": "password set for tiktunnel-user-02",
+    "status": "PASS",
+    "detail": ""
+  },
+  {
+    "name": "friend 1 login",
+    "status": "PASS",
+    "detail": ""
+  },
+  {
+    "name": "friend 2 login",
+    "status": "PASS",
+    "detail": ""
+  },
+  {
+    "name": "friend cannot access admin API",
+    "status": "PASS",
+    "detail": "http=401"
+  },
+  {
+    "name": "friend cannot read other account",
+    "status": "PASS",
+    "detail": ""
+  },
+  {
+    "name": "friend sees own data only",
+    "status": "PASS",
+    "detail": ""
+  },
+  {
+    "name": "friend VPN config generated",
+    "status": "PASS",
+    "detail": "ws"
+  },
+  {
+    "name": "VLESS URI uses Cloudcode HTTPS endpoint",
+    "status": "PASS",
+    "detail": "app-medium-1-ac2e.cldcode.host:443"
+  },
+  {
+    "name": "VLESS URI uses WebSocket + TLS",
+    "status": "PASS",
+    "detail": ""
+  },
+  {
+    "name": "real VLESS/WS traffic through proxy",
+    "status": "PASS",
+    "detail": "200 8388608"
+  },
+  {
+    "name": "traffic recorded from sing-box path",
+    "status": "PASS",
+    "detail": "delta=8388879B"
+  },
+  {
+    "name": "quota exhaustion enforced",
+    "status": "PASS",
+    "detail": ""
+  },
+  {
+    "name": "exhausted UUID removed from sing-box",
+    "status": "PASS",
+    "detail": ""
+  },
+  {
+    "name": "exhausted subscription blocked",
+    "status": "PASS",
+    "detail": ""
+  },
+  {
+    "name": "quota top-up restores account",
+    "status": "PASS",
+    "detail": ""
+  },
+  {
+    "name": "recovery: backend restart, data kept",
+    "status": "PASS",
+    "detail": ""
+  },
+  {
+    "name": "recovery: sing-box config restored",
+    "status": "PASS",
+    "detail": ""
+  },
+  {
+    "name": "recovery: subscription still valid",
+    "status": "PASS",
+    "detail": ""
+  }
+]

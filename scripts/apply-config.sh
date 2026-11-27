@@ -23,7 +23,7 @@ setsid nohup "$ROOT/bin/sing-box" run -c "$ROOT/config/sing-box.json" \
   >> "$ROOT/logs/sing-box-stdout.log" 2>&1 < /dev/null &
 echo $! > "$SB_PID"
 
-port="$(node -p "require('$ROOT/config/settings.json').listen_port")"
+port="$(node -p "require('$ROOT/config/runtime.js').serverPort")"
 wait_port "$port" || { echo "sing-box restart failed"; exit 1; }
 log_line "sing-box config applied and restarted"
 echo "config applied"

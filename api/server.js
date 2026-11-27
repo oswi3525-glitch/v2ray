@@ -8,7 +8,7 @@ const Fastify = require('fastify');
 
 const db = require('./db');
 const { ROOT } = db;
-const settings = JSON.parse(fs.readFileSync(path.join(ROOT, 'config', 'settings.json'), 'utf8'));
+const cfgEnv = require('../config/runtime');
 
 function loadSecrets() {
   const file = path.join(ROOT, 'config', 'secrets.env');
@@ -126,14 +126,14 @@ function applyConfig() {
 }
 
 function buildUri(row) {
-  const host = settings.public_host;
-  const port = Number(settings.listen_port);
+  const host = cfgEnv.serverHost;
+  const port = cfgEnv.serverPort;
   const q = new URLSearchParams();
   q.set('encryption', 'none');
-  q.set('type', settings.transport || 'tcp');
-  q.set('security', settings.security || 'none');
-  if (settings.security === 'tls' && settings.sni) q.set('sni', settings.sni);
-  if (settings.flow) q.set('flow', settings.flow);
+  q.set('type', cfgEnv.transport || 'tcp');
+  q.set('security', cfgEnv.security || 'none');
+  if (cfgEnv.security === 'tls' && cfgEnv.sni) q.set('sni', cfgEnv.sni);
+  if (cfgEnv.flow) q.set('flow', cfgEnv.flow);
   return `vless://${row.uuid}@${host}:${port}?${q.toString()}#${encodeURIComponent(row.name)}`;
 }
 
@@ -157,9 +157,10 @@ app.get('/api/status', { preHandler: requireAdmin }, async () => {
   }
   return {
     ok: true,
-    mode: settings.mode,
-    security: settings.security,
-    listen_port: Number(settings.listen_port),
+    mode: cfgEnv.mode,
+    security: cfgEnv.security,
+    server_host: cfgEnv.serverHost,
+    listen_port: cfgEnv.serverPort,
     sing_box: singBox,
     accounts: db.stats(),
     uptime_s: Math.floor((Date.now() - startedAt) / 1000)
@@ -168,7 +169,7 @@ app.get('/api/status', { preHandler: requireAdmin }, async () => {
 
 app.get('/api/users', { preHandler: requireAdmin }, async () => ({
   ok: true,
-  max_users: Number(settings.max_users),
+  max_users: cfgEnv.maxUsers,
   users: db.listUsers().map(publicUser)
 }));
 
@@ -177,7 +178,7 @@ app.post('/api/users', { preHandler: requireAdmin }, async (req, reply) => {
   if (!validateName(body.name)) return reply.code(400).send({ ok: false, error: 'invalid_name' });
   const expiresAt = validateExpiry(body.expires_at);
   if (expiresAt === false) return reply.code(400).send({ ok: false, error: 'invalid_expires_at' });
-  if (db.countActive() >= Number(settings.max_users)) {
+  if (db.countActive() >= cfgEnv.maxUsers) {
     return reply.code(409).send({ ok: false, error: 'active_user_limit_reached' });
   }
   const row = db.createUser({ name: body.name.trim(), expiresAt });
@@ -261,8 +262,8 @@ app.get('/api/metrics', { preHandler: requireAdmin }, async () => {
 });
 
 async function main() {
-  await app.listen({ host: settings.api_host, port: Number(settings.api_port) });
-  process.stdout.write(`tiktunnel-api listening on ${settings.api_host}:${settings.api_port}\n`);
+  await app.listen({ host: cfgEnv.apiHost, port: cfgEnv.apiPort });
+  process.stdout.write(`tiktunnel-api listening on ${cfgEnv.apiHost}:${cfgEnv.apiPort}\n`);
   const shutdown = async () => {
     try {
       await app.close();

@@ -3,6 +3,7 @@ package-lock.json
 bin/sing-box
 config/secrets.env
 config/sing-box.json
+subscriptions/*.txt
 database/*.db
 database/*.db-*
 logs/*

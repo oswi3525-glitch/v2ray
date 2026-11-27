@@ -1,0 +1,12 @@
+{
+  "duration_s": 126,
+  "samples": 12,
+  "rss_start_kb": 54792,
+  "rss_end_kb": 0,
+  "cpu_avg_pct": 30.33,
+  "transfers_ok": 24,
+  "transfers_fail": 0,
+  "restart_recovery": "PASS",
+  "completed_30_min": false,
+  "reason": "external Cloudcode TCP/WS path unavailable; local-only smoke"
+}

@@ -11,9 +11,9 @@ const db = require('../api/db');
 const { ROOT } = db;
 const RUNTIME = path.join(ROOT, 'tests', 'runtime');
 fs.mkdirSync(RUNTIME, { recursive: true });
-const settings = JSON.parse(fs.readFileSync(path.join(ROOT, 'config', 'settings.json'), 'utf8'));
+const cfgEnv = require('../config/runtime');
 const ADMIN = fs.readFileSync(path.join(ROOT, 'config', 'secrets.env'), 'utf8').match(/TIKTUNNEL_ADMIN_TOKEN=(.*)/)[1].trim();
-const API = `http://127.0.0.1:${settings.api_port}`;
+const API = `http://127.0.0.1:${cfgEnv.apiPort}`;
 const DURATION = Number(process.argv[2] || 1800);
 
 async function req(method, url, body) {
@@ -66,7 +66,7 @@ async function main() {
       const cfg = {
         log: { level: 'error', output: path.join(RUNTIME, `stability-client-${i}.log`) },
         inbounds: [{ type: 'socks', tag: 's', listen: '127.0.0.1', listen_port: 18300 + i }],
-        outbounds: [{ type: 'vless', tag: 'p', server: '127.0.0.1', server_port: Number(settings.listen_port), uuid: users[i].uuid, flow: '' }],
+        outbounds: [{ type: 'vless', tag: 'p', server: '127.0.0.1', server_port: cfgEnv.serverPort, uuid: users[i].uuid, flow: '' }],
         route: { rules: [], final: 'p' }
       };
       const f = path.join(RUNTIME, `stability-client-${i}.json`);

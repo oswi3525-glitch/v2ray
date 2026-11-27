@@ -11,12 +11,12 @@ start_singbox() {
     echo "sing-box already running; skipping (no duplicate allowed)"
     return 0
   fi
-  [ -f "$ROOT/config/sing-box.json" ] || node "$ROOT/server/render-config.js"
+  node "$ROOT/server/render-control-config.js" >/dev/null
   "$ROOT/bin/sing-box" check -c "$ROOT/config/sing-box.json" >/dev/null
   setsid nohup "$ROOT/bin/sing-box" run -c "$ROOT/config/sing-box.json" \
     >> "$ROOT/logs/sing-box-stdout.log" 2>&1 < /dev/null &
   echo $! > "$SB_PID"
-  wait_port "$(node -p "require('$ROOT/config/settings.json').listen_port")" || {
+  wait_port "$(node -p "require('$ROOT/config/control.json').singbox_ws_port")" || {
     echo "sing-box failed to bind port"; return 1
   }
   echo "sing-box started (pid $(cat "$SB_PID"))"
@@ -28,10 +28,10 @@ start_api() {
     echo "api already running; skipping"
     return 0
   fi
-  setsid nohup node "$ROOT/api/server.js" >> "$ROOT/logs/api.log" 2>&1 < /dev/null &
+  setsid nohup node "$ROOT/control/server.js" >> "$ROOT/logs/api.log" 2>&1 < /dev/null &
   echo $! > "$API_PID"
   local port
-  port="$(node -p "require('$ROOT/config/settings.json').api_port")"
+  port="$(node -p "require('$ROOT/config/runtime.js').serverPort")"
   for _ in $(seq 1 40); do
     if curl -fsS -m 1 "http://127.0.0.1:${port}/health" >/dev/null 2>&1; then
       echo "api started (pid $(cat "$API_PID"))"

@@ -6,18 +6,18 @@ const crypto = require('node:crypto');
 const db = require('../api/db');
 
 const { ROOT } = db;
-const settings = JSON.parse(fs.readFileSync(path.join(ROOT, 'config', 'settings.json'), 'utf8'));
+const cfgEnv = require('../config/runtime');
 const outDir = path.join(ROOT, 'subscriptions');
 fs.mkdirSync(outDir, { recursive: true });
 
 function buildUri(row) {
   const q = new URLSearchParams();
   q.set('encryption', 'none');
-  q.set('type', settings.transport || 'tcp');
-  q.set('security', settings.security || 'none');
-  if (settings.security === 'tls' && settings.sni) q.set('sni', settings.sni);
-  if (settings.flow) q.set('flow', settings.flow);
-  return `vless://${row.uuid}@${settings.public_host}:${settings.listen_port}?${q.toString()}#${encodeURIComponent(row.name)}`;
+  q.set('type', cfgEnv.transport || 'tcp');
+  q.set('security', cfgEnv.security || 'none');
+  if (cfgEnv.security === 'tls' && cfgEnv.sni) q.set('sni', cfgEnv.sni);
+  if (cfgEnv.flow) q.set('flow', cfgEnv.flow);
+  return `vless://${row.uuid}@${cfgEnv.serverHost}:${cfgEnv.serverPort}?${q.toString()}#${encodeURIComponent(row.name)}`;
 }
 
 const byToken = new Map();

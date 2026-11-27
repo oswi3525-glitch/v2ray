@@ -12,9 +12,9 @@ const db = require('../api/db');
 const { ROOT } = db;
 const RUNTIME = path.join(ROOT, 'tests', 'runtime');
 fs.mkdirSync(RUNTIME, { recursive: true });
-const settings = JSON.parse(fs.readFileSync(path.join(ROOT, 'config', 'settings.json'), 'utf8'));
+const cfgEnv = require('../config/runtime');
 const ADMIN = fs.readFileSync(path.join(ROOT, 'config', 'secrets.env'), 'utf8').match(/TIKTUNNEL_ADMIN_TOKEN=(.*)/)[1].trim();
-const API = `http://127.0.0.1:${settings.api_port}`;
+const API = `http://127.0.0.1:${cfgEnv.apiPort}`;
 const DOWNLOAD = 'https://speed.cloudflare.com/__down?bytes=5000000';
 const TARGETS = [['1.1.1.1', 443], ['8.8.8.8', 443], ['github.com', 443]];
 
@@ -88,7 +88,7 @@ async function main() {
     const cfg = {
       log: { level: 'error', output: path.join(RUNTIME, 'netlab-client.log') },
       inbounds: [{ type: 'socks', tag: 's', listen: '127.0.0.1', listen_port: 18400 }],
-      outbounds: [{ type: 'vless', tag: 'p', server: '127.0.0.1', server_port: Number(settings.listen_port), uuid: user.uuid, flow: '' }],
+      outbounds: [{ type: 'vless', tag: 'p', server: '127.0.0.1', server_port: cfgEnv.serverPort, uuid: user.uuid, flow: '' }],
       route: { rules: [], final: 'p' }
     };
     const f = path.join(RUNTIME, 'netlab-client.json');
