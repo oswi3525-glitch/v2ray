@@ -26,7 +26,9 @@ function copy(text) { navigator.clipboard?.writeText(text).then(() => toast('Cop
 function shell(title, body) {
   root.innerHTML = `<div class="wrap"><div class="row" style="justify-content:space-between">
     <h1>TikTunnel Control</h1><div class="row"><span class="sub">${esc(me?.username || '')}</span>
+    <button class="ghost small" id="clear-cache" title="Reload assets without browser cache">Clear cache</button>
     <button class="ghost small" id="logout">Logout</button></div></div>${body}</div>`;
+  document.getElementById('clear-cache').onclick = () => { location.href = location.pathname + '?r=' + Date.now(); };
   document.getElementById('logout').onclick = async () => { await api('/api/auth/logout', { method: 'POST' }); sessionStorage.clear(); location.href = '/'; };
 }
 
@@ -79,11 +81,18 @@ async function adminPage() {
     <div class="stat"><span>Endpoint</span><b style="font-size:13px">${esc(ov.public_endpoint)}</b></div>
   </div>
   <div class="card"><h2>Accounts</h2><div class="scroll"><table><thead><tr><th>User</th><th>Status</th><th>Quota</th><th>UUID</th><th>Actions</th></tr></thead><tbody>${rows || '<tr><td colspan="5">No accounts yet.</td></tr>'}</tbody></table></div></div>
+  <div class="card"><h2>Add to Shadowrocket</h2>
+    ${us.users.length ? `<label>Account</label><select id="shadow-user">${us.users.map(u => `<option value="${u.id}">${esc(u.display_name)} (${esc(u.username)})</option>`).join('')}</select>
+    <div class="row" style="margin-top:12px">
+      <button id="shadow-add">Add to Shadowrocket</button>
+      <button class="ghost" id="shadow-copy">Copy subscription</button>
+    </div>` : '<p class="sub">No friend accounts yet. Create one below first.</p>'}
+  </div>
   <div class="card"><h2>Create friend</h2><form id="create">
     <div class="row"><div style="flex:1;min-width:140px"><label>Username</label><input id="nu" required></div>
     <div style="flex:1;min-width:140px"><label>Display name</label><input id="nd" required></div>
-    <div style="flex:1;min-width:100px"><label>Quota (GB)</label><input id="nq" type="number" min="0" value="5"></div></div>
-    <label>Password</label><input id="np" type="password" required>
+    <div style="flex:1;min-width:100px"><label>Quota (GB)</label><input id="nq" type="number" min="0" step="any" value="5"></div></div>
+    <label>Password (min 8 characters)</label><input id="np" type="password" minlength="8" required>
     <button style="margin-top:12px" type="submit">Create account</button></form></div>
   <div class="card"><h2>Quota</h2><form id="quota">
     <label>User ID</label><input id="qid" type="number" min="1" required>
@@ -96,10 +105,14 @@ async function adminPage() {
 
   document.getElementById('create').onsubmit = async e => {
     e.preventDefault();
+    const username = document.getElementById('nu').value.trim();
+    const password = document.getElementById('np').value;
+    if (!/^[A-Za-z0-9_.-]{2,32}$/.test(username)) { toast('invalid_username'); return; }
+    if (password.length < 8) { toast('invalid_password'); return; }
     try {
       await api('/api/admin/users', { method: 'POST', body: JSON.stringify({
-        username: document.getElementById('nu').value, display_name: document.getElementById('nd').value,
-        password: document.getElementById('np').value, quota_gb: Number(document.getElementById('nq').value)
+        username, display_name: document.getElementById('nd').value.trim() || username,
+        password, quota_gb: document.getElementById('nq').value
       }) });
       toast('Account created'); adminPage();
     } catch (err) { toast(err.message); }
@@ -121,15 +134,27 @@ async function adminPage() {
     if (b.dataset.copy === 'uri') { const d = await fetch(`/api/sub/${u.subscription_token}?raw=1`); val = await d.text(); }
     copy(val);
   });
+  async function shadowrocketFor(u) {
+    if (!u?.subscription_token) throw new Error('configuration not ready');
+    const r = await fetch(`/api/sub/${u.subscription_token}?raw=1`);
+    const uri = (await r.text()).trim();
+    if (!r.ok || !uri.startsWith('vless://')) throw new Error('configuration not ready');
+    location.href = 'shadowrocket://add/' + btoa(unescape(encodeURIComponent(uri)));
+  }
   document.querySelectorAll('[data-shadow]').forEach(b => b.onclick = async () => {
     const u = us.users.find(x => x.id === Number(b.dataset.id));
-    try {
-      const r = await fetch(`/api/sub/${u.subscription_token}?raw=1`);
-      const uri = (await r.text()).trim();
-      if (!r.ok || !uri.startsWith('vless://')) throw new Error('configuration not ready');
-      location.href = 'shadowrocket://add/' + btoa(unescape(encodeURIComponent(uri)));
-    } catch (err) { toast(err.message); }
+    try { await shadowrocketFor(u); } catch (err) { toast(err.message); }
   });
+  if (document.getElementById('shadow-add')) {
+    document.getElementById('shadow-add').onclick = async () => {
+      const u = us.users.find(x => x.id === Number(document.getElementById('shadow-user').value));
+      try { await shadowrocketFor(u); } catch (err) { toast(err.message); }
+    };
+    document.getElementById('shadow-copy').onclick = () => {
+      const u = us.users.find(x => x.id === Number(document.getElementById('shadow-user').value));
+      copy(u ? `${location.origin}/api/sub/${u.subscription_token}` : '');
+    };
+  }
   document.querySelectorAll('[data-act]').forEach(b => b.onclick = async () => {
     const id = b.dataset.id;
     if (b.dataset.act === 'delete' && !confirm('Revoke this account?')) return;

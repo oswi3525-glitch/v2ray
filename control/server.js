@@ -143,7 +143,13 @@ app.setErrorHandler((err, _req, reply) => reply.code(400).send({ ok: false, erro
 
 function readStatic(name, type) {
   return (req, reply) => {
-    reply.type(type).send(fs.readFileSync(path.join(ROOT, 'web', name)));
+    reply.header('Cache-Control', 'no-store, max-age=0');
+    let body = fs.readFileSync(path.join(ROOT, 'web', name));
+    if (name === 'index.html') {
+      const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
+      body = Buffer.from(body.toString('utf8').replace(/__VER__/g, pkg.version));
+    }
+    reply.type(type).send(body);
   };
 }
 for (const p of ['/', '/admin', '/friend', '/setup', '/login']) {
@@ -221,10 +227,13 @@ app.post('/api/admin/users', async (req, reply) => {
   const a = guard(req, reply, 'admin'); if (!a || !csrfOk(req, a)) return reply.code(401).send({ ok: false, error: 'unauthorized' });
   if (cdb.friendCount() >= 2) return reply.code(409).send({ ok: false, error: 'friend_limit_reached' });
   const b = req.body || {};
-  if (!validUsername(b.username) || !validPassword(b.password) || typeof b.display_name !== 'string') {
-    return reply.code(400).send({ ok: false, error: 'invalid_input' });
-  }
-  const gb = Number(b.quota_gb || 0);
+  const username = typeof b.username === 'string' ? b.username.trim() : '';
+  if (!validUsername(username)) return reply.code(400).send({ ok: false, error: 'invalid_username' });
+  if (!validPassword(b.password)) return reply.code(400).send({ ok: false, error: 'invalid_password' });
+  const displayName = typeof b.display_name === 'string' && b.display_name.trim()
+    ? b.display_name.trim().slice(0, 60) : username;
+  const rawQuota = typeof b.quota_gb === 'string' ? b.quota_gb.replace(',', '.').trim() : b.quota_gb;
+  const gb = rawQuota === '' || rawQuota === null || rawQuota === undefined ? 0 : Number(rawQuota);
   if (!Number.isFinite(gb) || gb < 0 || gb > 10000) return reply.code(400).send({ ok: false, error: 'invalid_quota' });
   let expires = null;
   if (b.expires_at) {
@@ -232,10 +241,16 @@ app.post('/api/admin/users', async (req, reply) => {
     if (!Number.isFinite(t) || t <= Date.now()) return reply.code(400).send({ ok: false, error: 'invalid_expiry' });
     expires = new Date(t).toISOString();
   }
-  const u = cdb.createFriend({
-    username: b.username, displayName: b.display_name.slice(0, 60),
-    passwordHash: bcrypt.hashSync(b.password, 12), quotaBytes: Math.round(gb * 1e9), expiresAt: expires
-  });
+  let u;
+  try {
+    u = cdb.createFriend({
+      username, displayName,
+      passwordHash: bcrypt.hashSync(b.password, 12), quotaBytes: Math.round(gb * 1e9), expiresAt: expires
+    });
+  } catch (e) {
+    if (String(e.message).includes('UNIQUE')) return reply.code(409).send({ ok: false, error: 'username_taken' });
+    return reply.code(500).send({ ok: false, error: 'create_failed' });
+  }
   await applyConfig().catch(() => {});
   return reply.code(201).send({ ok: true, user: publicUser(u) });
 });
