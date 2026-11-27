@@ -64,6 +64,7 @@ async function adminPage() {
       <button class="small ghost" data-copy="uuid" data-id="${u.id}">Copy UUID</button>
       <button class="small ghost" data-copy="uri" data-id="${u.id}">Copy VLESS</button>
       <button class="small ghost" data-copy="sub" data-id="${u.id}">Copy Sub</button>
+      <button class="small ghost" data-shadow data-id="${u.id}">Add to Shadowrocket</button>
       <button class="small ghost" data-act="disable" data-id="${u.id}">Disable</button>
       <button class="small ghost" data-act="enable" data-id="${u.id}">Enable</button>
       <button class="small danger" data-act="delete" data-id="${u.id}">Revoke</button>
@@ -73,6 +74,7 @@ async function adminPage() {
     <div class="stat"><span>CPU</span><b>${ov.server.cpu_pct}%</b></div>
     <div class="stat"><span>RAM used</span><b>${(ov.server.ram_used_kb / 1048576).toFixed(2)} GB</b></div>
     <div class="stat"><span>Friends</span><b>${ov.accounts.friends}/2</b></div>
+    <div class="stat"><span>Total accounts</span><b>${ov.accounts.friends + (ov.accounts.admin ? 1 : 0)}/3</b></div>
     <div class="stat"><span>Active VPN</span><b>${ov.vpn_users}</b></div>
     <div class="stat"><span>Endpoint</span><b style="font-size:13px">${esc(ov.public_endpoint)}</b></div>
   </div>
@@ -118,6 +120,15 @@ async function adminPage() {
     if (b.dataset.copy === 'sub') val = `${location.origin}/api/sub/${u.subscription_token}`;
     if (b.dataset.copy === 'uri') { const d = await fetch(`/api/sub/${u.subscription_token}?raw=1`); val = await d.text(); }
     copy(val);
+  });
+  document.querySelectorAll('[data-shadow]').forEach(b => b.onclick = async () => {
+    const u = us.users.find(x => x.id === Number(b.dataset.id));
+    try {
+      const r = await fetch(`/api/sub/${u.subscription_token}?raw=1`);
+      const uri = (await r.text()).trim();
+      if (!r.ok || !uri.startsWith('vless://')) throw new Error('configuration not ready');
+      location.href = 'shadowrocket://add/' + btoa(unescape(encodeURIComponent(uri)));
+    } catch (err) { toast(err.message); }
   });
   document.querySelectorAll('[data-act]').forEach(b => b.onclick = async () => {
     const id = b.dataset.id;
