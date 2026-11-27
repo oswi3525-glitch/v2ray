@@ -144,16 +144,18 @@ async function adminPage() {
   document.querySelectorAll('[data-copy]').forEach(b => b.onclick = async () => {
     const u = us.users.find(x => x.id === Number(b.dataset.id));
     let val = u?.uuid || '';
-    if (b.dataset.copy === 'uri') val = (await api(`/api/sub/${u.subscription_token}?raw=1`)).text?.() || '';
     if (b.dataset.copy === 'sub') val = `${location.origin}/api/sub/${u.subscription_token}`;
-    if (b.dataset.copy === 'uri') { const d = await fetch(`/api/sub/${u.subscription_token}?raw=1`); val = await d.text(); }
+    if (b.dataset.copy === 'uri') val = u?.vless_uri || '';
     copy(val);
   });
   async function shadowrocketFor(u) {
-    if (!u?.subscription_token) throw new Error('configuration not ready');
-    const r = await fetch(`/api/sub/${u.subscription_token}?raw=1`);
-    const uri = (await r.text()).trim();
-    if (!r.ok || !uri.startsWith('vless://')) throw new Error('configuration not ready');
+    let uri = u && u.vless_uri;
+    if (!uri && u && u.subscription_token) {
+      const r = await fetch(`/api/sub/${u.subscription_token}?raw=1`);
+      uri = (await r.text()).trim();
+      if (!r.ok) uri = '';
+    }
+    if (!uri || !uri.startsWith('vless://')) throw new Error('configuration not ready');
     location.href = 'shadowrocket://add/' + btoa(unescape(encodeURIComponent(uri)));
   }
   document.querySelectorAll('[data-shadow]').forEach(b => b.onclick = async () => {

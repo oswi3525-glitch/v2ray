@@ -104,6 +104,7 @@ function publicUser(u) {
     remaining_bytes: Math.max(0, (u?.quota_bytes || 0) - (u?.used_upload || 0) - (u?.used_download || 0)),
     last_connection: u?.last_connection, last_seen: u?.last_seen,
     uuid: v?.uuid || null, subscription_token: s?.token || null, subscription_path: s?.path || null,
+    vless_uri: u ? vlessUri(u) : null,
     password_set: !!u?.password_hash
   };
 }
