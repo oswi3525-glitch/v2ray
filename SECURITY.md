@@ -2,7 +2,7 @@
 
 | Control | Implementation |
 |---|---|
-| Password hashing | bcryptjs cost 12 (`admins`, `users`); no plaintext column |
+| Password hashing | bcryptjs cost 12 (`admins`, `users`); no plaintext column. Admin credentials are read from `ADMIN_USERNAME`/`ADMIN_PASSWORD` in `.env` and synced at startup; no first-run setup endpoint or screen exists. |
 | Session | random 256-bit id, DB-backed, expiry 2 h admin / 12 h friend, HttpOnly + SameSite=Strict cookie (`Secure` when `cookie_secure=true`) |
 | CSRF | double-submit token returned by login/setup, required as `x-csrf-token` on all admin writes |
 | RBAC | `/api/admin/*` admin only; `/api/friend/*` friend only; friend cannot read other user records |

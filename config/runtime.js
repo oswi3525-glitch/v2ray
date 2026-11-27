@@ -27,6 +27,8 @@ module.exports = {
   serverPort: Number(env.SERVER_PORT || settings.listen_port || 8443),
   protocol: env.PROTOCOL || 'vless',
   maxUsers: Number(env.MAX_USERS || settings.max_users || 3),
+  adminUsername: env.ADMIN_USERNAME || '',
+  adminPassword: env.ADMIN_PASSWORD || '',
   listenHost: settings.listen_host || '0.0.0.0',
   apiHost: settings.api_host || '127.0.0.1',
   apiPort: Number(settings.api_port || 3000),

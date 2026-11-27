@@ -31,26 +31,19 @@ function shell(title, body) {
 }
 
 async function authScreen() {
-  const setup = await fetch('/api/auth/me').then(r => r.ok);
-  if (setup) { location.href = '/admin'; return; }
-  const s = await fetch('/api/admin/overview').then(r => r.json()).catch(() => ({}));
-  const first = !s.ok;
   root.innerHTML = `<div class="center"><h1>TikTunnel Control</h1>
-    <p class="sub">${first ? 'Create Administrator — first-time setup' : 'Sign in'}</p>
+    <p class="sub">Sign in</p>
     <div class="card" style="width:100%;max-width:380px">
       <form id="f">
         <label>Username</label><input id="u" autocomplete="username" required>
         <label>Password</label><input id="p" type="password" autocomplete="current-password" required>
-        ${first ? '<label>Confirm password</label><input id="p2" type="password" required>' : ''}
-        <button style="width:100%;margin-top:16px" type="submit">${first ? 'Create Admin' : 'Sign In'}</button>
+        <button style="width:100%;margin-top:16px" type="submit">Sign In</button>
       </form></div></div>`;
   document.getElementById('f').onsubmit = async (e) => {
     e.preventDefault();
     const u = document.getElementById('u').value, p = document.getElementById('p').value;
     try {
-      const path = first ? '/api/auth/admin/setup' : '/api/auth/login';
-      const body = first ? { username: u, password: p, confirm: document.getElementById('p2').value } : { username: u, password: p };
-      const d = await api(path, { method: 'POST', body: JSON.stringify(body) });
+      const d = await api('/api/auth/login', { method: 'POST', body: JSON.stringify({ username: u, password: p }) });
       sessionStorage.setItem('csrf', d.csrf);
       location.href = d.role === 'admin' ? '/admin' : '/friend';
     } catch (err) { toast(err.message); }

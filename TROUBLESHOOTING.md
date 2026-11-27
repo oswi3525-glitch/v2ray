@@ -12,7 +12,7 @@ Follow this order; never reapply the same failed fix three times without changin
 
 | Symptom | Cause / fix |
 |---|---|
-| Admin page shows "Create Administrator" repeatedly | `config/secrets` / DB path mismatch; verify `database/control.db` exists and is writable; `adminExists()` must be true after setup |
+| Login page keeps loading / cannot log in as admin | `ADMIN_USERNAME`/`ADMIN_PASSWORD` missing or placeholder in `.env`; startup fails with an explicit message. Set real values and restart; credentials are synced from `.env` at every start |
 | Friend cannot log in | password not set on imported account (legacy users have no password) — admin must use **Reset password** |
 | Friend login blocked after attempts | rate limit 10/5 min; wait or use another IP |
 | Admin POST returns 401 | missing `x-csrf-token`; log in again to get a fresh CSRF token |

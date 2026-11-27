@@ -8,7 +8,6 @@ Auth: session cookie `tiktunnel_session` (HttpOnly). All mutating admin requests
 
 | Method | Path | Auth | Purpose |
 |---|---|---|---|
-| POST | `/api/auth/admin/setup` | none (only if no admin) | `{username,password,confirm}` |
 | POST | `/api/auth/login` | none | `{username,password}` → `{role,csrf}` |
 | POST | `/api/auth/logout` | session | end session |
 | GET | `/api/auth/me` | session | `{role,csrf,username}` |

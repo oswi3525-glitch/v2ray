@@ -163,6 +163,18 @@ function createAdmin(username, hash) {
     db.exec('COMMIT');
   } catch (e) { db.exec('ROLLBACK'); throw e; }
 }
+function seedAdminFromEnv(username, hash) {
+  const existing = getAdmin();
+  if (!existing) {
+    createAdmin(username, hash);
+    return;
+  }
+  db.prepare('UPDATE admins SET username = ?, password_hash = ?, updated_at = ? WHERE id = ?')
+    .run(username, hash, now(), existing.id);
+  setSetting('admin_setup_complete', '1');
+  audit('system', 'admin_synced_from_env', 'admin');
+}
+
 function getAdmin() {
   return db.prepare('SELECT * FROM admins ORDER BY id LIMIT 1').get();
 }
@@ -318,7 +330,7 @@ function auditLogs(limit = 50) {
 
 module.exports = {
   ROOT, DB_PATH, db, now, audit, getSetting, setSetting,
-  adminExists, createAdmin, getAdmin, updateAdminHash,
+  adminExists, createAdmin, seedAdminFromEnv, getAdmin, updateAdminHash,
   friendCount, listUsers, getUser, getUserByUsername, getUserByToken, getVpnClient, getSubscription,
   createFriend, setFriendPassword, changeQuota, setUserState, revokeFriend,
   recordTraffic, trafficHistory, openSession, getSession, deleteSession, purgeSessions,

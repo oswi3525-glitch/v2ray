@@ -79,10 +79,10 @@ function rateLimited(req, key, limit, windowMs) {
   return b.n > limit;
 }
 function validPassword(p) {
-  return typeof p === 'string' && p.length >= 12 && /[A-Za-z]/.test(p) && /\d/.test(p);
+  return typeof p === 'string' && p.length >= 8;
 }
 function validUsername(u) {
-  return typeof u === 'string' && /^[a-z0-9_-]{3,24}$/.test(u);
+  return typeof u === 'string' && /^[A-Za-z0-9_.-]{2,32}$/.test(u.trim());
 }
 function publicUser(u) {
   const v = u ? cdb.getVpnClient(u.id) : null;
@@ -153,22 +153,11 @@ app.get('/style.css', readStatic('style.css', 'text/css; charset=utf-8'));
 app.get('/app.js', readStatic('app.js', 'application/javascript; charset=utf-8'));
 app.get('/health', async () => ({ ok: true, service: 'tiktunnel-control', uptime_s: Math.floor((Date.now() - startedAt) / 1000) }));
 
-app.post('/api/auth/admin/setup', async (req, reply) => {
-  if (cdb.adminExists()) return reply.code(409).send({ ok: false, error: 'admin_exists' });
-  const { username, password, confirm } = req.body || {};
-  if (!validUsername(username) || !validPassword(password) || password !== confirm) {
-    return reply.code(400).send({ ok: false, error: 'invalid_input' });
-  }
-  cdb.createAdmin(username, bcrypt.hashSync(password, 12));
-  const s = cdb.openSession(cdb.getAdmin().id, 'admin');
-  setSessionCookie(reply, s);
-  return reply.send({ ok: true, role: 'admin', csrf: s.csrf });
-});
-
 app.post('/api/auth/login', async (req, reply) => {
   if (rateLimited(req, 'login', 10, 300000)) return reply.code(429).send({ ok: false, error: 'too_many_attempts' });
-  const { username, password } = req.body || {};
-  if (typeof username !== 'string' || typeof password !== 'string') {
+  const username = typeof req.body?.username === 'string' ? req.body.username.trim() : '';
+  const password = typeof req.body?.password === 'string' ? req.body.password : '';
+  if (!username || !password) {
     return reply.code(400).send({ ok: false, error: 'invalid_input' });
   }
   const admin = cdb.getAdmin();
@@ -525,6 +514,18 @@ function enforceQuota() {
 }
 
 async function main() {
+  const adminUser = String(envcfg.adminUsername || '').trim();
+  const adminPass = String(envcfg.adminPassword || '');
+  if (!adminUser || adminPass.length < 8 || /^CHANGE_ME/i.test(adminPass)) {
+    process.stderr.write('control failed: set ADMIN_USERNAME and a real ADMIN_PASSWORD (>= 8 chars, not CHANGE_ME) in .env\n');
+    process.exit(1);
+  }
+  try {
+    cdb.seedAdminFromEnv(adminUser, bcrypt.hashSync(adminPass, 12));
+  } catch (e) {
+    process.stderr.write(`control failed: could not seed admin from .env: ${e.message}\n`);
+    process.exit(1);
+  }
   await app.listen({ host: control.appHost, port: control.appPort });
   process.stdout.write(`tiktunnel-control listening on ${control.appHost}:${control.appPort} mode=${control.vpn_mode}\n`);
   setInterval(enforceQuota, Number(control.quota_check_ms || 10000)).unref();

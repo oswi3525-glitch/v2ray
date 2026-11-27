@@ -8,6 +8,7 @@ const crypto = require('node:crypto');
 const { spawn, spawnSync, execFileSync } = require('node:child_process');
 const cdb = require('../control/db');
 const cfg = require('../config/control.json');
+const envcfg = require('../config/runtime');
 const { ROOT } = cdb;
 const RUNTIME = path.join(ROOT, 'tests', 'runtime');
 fs.mkdirSync(RUNTIME, { recursive: true });
@@ -47,15 +48,15 @@ async function main() {
   const credFile = path.join(RUNTIME, 'test-credentials.json');
   let creds = {};
   if (fs.existsSync(credFile)) creds = JSON.parse(fs.readFileSync(credFile, 'utf8'));
-  const adminPw = process.env.TIKTUNNEL_TEST_ADMIN_PASSWORD || creds.admin || 'TestAdmin!' + crypto.randomBytes(9).toString('base64url');
+  const adminUser = envcfg.adminUsername || 'admin';
+  const adminPw = envcfg.adminPassword || '';
   const friendPw = process.env.TIKTUNNEL_TEST_FRIEND_PASSWORD || creds.friend || 'TestFriend!' + crypto.randomBytes(9).toString('base64url');
-  creds = { admin: adminPw, friend: friendPw };
+  creds = { friend: friendPw };
   fs.writeFileSync(credFile, JSON.stringify(creds, null, 2), { mode: 0o600 });
 
-  let setup = await api('/api/auth/admin/setup', { method: 'POST', body: { username: 'admin', password: adminPw, confirm: adminPw } });
-  if (setup.status === 409) setup = await api('/api/auth/login', { method: 'POST', body: { username: 'admin', password: adminPw } });
-  check('admin first setup / login', setup.status === 200, `http=${setup.status}`);
-  let admin = { cookie: setup.cookie, csrf: setup.data.csrf };
+  const login = await api('/api/auth/login', { method: 'POST', body: { username: adminUser, password: adminPw } });
+  check('admin login from .env', login.status === 200, `http=${login.status}`);
+  let admin = { cookie: login.cookie, csrf: login.data.csrf };
   const me = await api('/api/auth/me', { cookie: admin.cookie });
   check('admin session valid', me.status === 200 && me.data.role === 'admin');
 

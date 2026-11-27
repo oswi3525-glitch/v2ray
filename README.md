@@ -25,13 +25,17 @@ cp .env.example config/env
 | `SERVER_PORT` | Port the app must **bind inside the container** |
 | `PROTOCOL` | `vless` |
 | `MAX_USERS` | 3 (Admin + 2 friends) |
+| `ADMIN_USERNAME` | Admin login name; seeded into SQLite at startup |
+| `ADMIN_PASSWORD` | Admin password (≥8 chars, not `CHANGE_ME…`); stored only as a bcrypt hash |
 | `SINGBOX_VERSION` | Optional release pin; default comes from `config/control.json` → `singbox_version` (`1.14.5`) |
 | `TIKTUNNEL_MAX_LOG_BYTES` | Log rotation size, default 5 MiB |
 | `TIKTUNNEL_NO_WATCHDOG` | Set `1` to disable the watchdog |
 
 **How to get the real `SERVER_PORT`:** open the Pterodactyl panel → your server → **Allocations** and use the allocated TCP port (often exposed to the container as `PORT`). If Cloudcode forwards public TCP 23952 to a different internal port, set `SERVER_PORT` to that **internal** port; the public port remains the one Cloudcode allocated. Never guess the number.
 
-The admin token is generated once into `config/secrets.env` (chmod 600) by `scripts/bootstrap.sh`. It is never printed.
+There is no first-run admin setup screen: the web UI always shows only the login form. Admin credentials come from `ADMIN_USERNAME` / `ADMIN_PASSWORD` in `.env` and are synced into SQLite at every startup (only a bcrypt hash is stored). Change them in `.env` and restart to take effect. If they are missing or still the placeholder, startup fails with a clear message — no default password is used.
+
+A separate admin API token is generated once into `config/secrets.env` (chmod 600) by `scripts/bootstrap.sh`. It is never printed.
 
 ## Startup Command (Pterodactyl)
 
