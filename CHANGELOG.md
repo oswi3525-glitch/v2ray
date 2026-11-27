@@ -1,5 +1,27 @@
 # CHANGELOG.md
 
+## 2.2.0 — Connectivity fix: VLESS TCP over port mux + real diagnostics
+
+### Added
+- `control/port-mux.js`: nhận raw TCP trên port public 23952, phân loại HTTP/VLESS, giữ dashboard và VLESS trên cùng port; ghi byte thật theo UUID vào DB.
+- sing-box có thêm VLESS TCP inbound `127.0.0.1:23955` cạnh WS inbound 23954.
+- `control/diagnostics.js` + `GET /api/diagnostics/run`: 9 hạng mục thật, trả status/duration/cause/fix; `UNKNOWN` cho mục không chứng minh được từ server. Tab Diagnostics trên cả admin và friend.
+- `CONNECTIVITY_AUDIT.md`: bằng chứng đo được về lỗi Shadowrocket.
+
+### Changed
+- Public transport = VLESS TCP (`vn-hn.cldcode.host:23952`, `security=none`) thay vì WSS; subscription URL dùng cùng endpoint public.
+- Fastify chuyển sang `127.0.0.1:23950`; scripts start/stop/watchdog/health-check quản lý thêm port-mux.
+- `MAX_USERS=2`; E2E chuyển sang VLESS TCP qua mux.
+
+### Verified
+- `npm test` 36/36 PASS (gồm 8 MiB VLESS TCP thật + quota delta 8388767B).
+- Diagnostics: PASS 5 / FAIL 2 (ws, subscription trên endpoint public) / WARNING 1 / UNKNOWN 1 — phản ánh đúng sự thật hạ tầng.
+- Benchmark: API 1.30 ms, download 655.23 Mbps, TCP server→1.1.1.1 2.26 ms, CPU 28.17%, RAM 4.49 GB.
+
+### Blocker không sửa được trong workspace
+- `vn-hn.cldcode.host:23952` là deployment **khác DB/admin** (login 401, subscription 404) → UUID local không hợp lệ ở đó.
+- Forwarder Cloudcode chặn `Upgrade: websocket`; HTTPS Cloudflare trả 404; không có TLS terminate tới app. Cần deploy code+account lên đúng host public.
+
 ## 2.1.1 — Loading hang fix + notifications
 
 ### Fixed

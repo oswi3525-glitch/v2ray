@@ -4,18 +4,21 @@
 
 | Component | Bind | Public? |
 |---|---|---|
-| Control app (Fastify: web + API + speed endpoints + WS proxy) | `0.0.0.0:23952` | có, qua Cloudcode primary port |
-| sing-box VLESS-WS inbound | `127.0.0.1:23954`, path `/vpn` | không |
-| Admin API | cùng app, `/api/admin/*` (session + CSRF) | không có port riêng |
+| Port mux (HTTP/VLESS sniffing) | `0.0.0.0:23952` | có — port public duy nhất |
+| Control app (Fastify: web + API + speed endpoints) | `127.0.0.1:23950` | không |
+| sing-box VLESS-WS inbound (local/test) | `127.0.0.1:23954`, path `/vpn` | không |
+| sing-box VLESS-TCP inbound (public) | `127.0.0.1:23955` | không |
+| Admin API | cùng Fastify, `/api/admin/*` (session + CSRF) | qua mux |
 
-Chỉ Node bind port public; sing-box loopback-only. Không chia sẻ port.
+Port public duy nhất là 23952; mux chuyển HTTP tới Fastify và byte VLESS tới sing-box. Không sử dụng port public mới.
 
 ## Request flow
 
 - `/`, `/admin`, `/friend` → SPA tĩnh (`web/index.html`, `app.js`, `style.css`), cache `no-store`.
 - `/api/*` → REST: session cookie `HttpOnly`/`SameSite=Strict`, CSRF cho mọi write, RBAC admin/friend, rate limit.
 - `/api/net/*` → endpoint đo tốc độ thật (xem `NETWORK_TEST.md`).
-- `/vpn/<token>[.<device-id>]` → WebSocket upgrade. Validate token + accountReady, parse device id, mở WS tới `ws://127.0.0.1:23954/vpn`, pipe frame hai chiều, đếm byte theo user + device.
+- VLESS TCP → mux đọc UUID ở byte 1–17, chuyển tới `127.0.0.1:23955`, đếm byte theo UUID và ghi DB mỗi 2s/lúc đóng.
+- `/vpn/<token>[.<device-id>]` (chỉ local/test) → WS upgrade tới `ws://127.0.0.1:23954/vpn`. Public forwarder chặn `Upgrade: websocket` nên không dùng cho client.
 
 ## Shadowrocket flow
 
@@ -26,9 +29,10 @@ Chỉ Node bind port public; sing-box loopback-only. Không chia sẻ port.
 
 ## VPN transport
 
-- VLESS/WSS tới `app-medium-1-ac2e.cldcode.host:443`, path `/vpn/<token>[.<device-id>]`, Host/SNI = public host, TLS do Cloudflare terminate.
-- Device id nối sau token bằng `.` (không dùng `?d=` vì sing-box encode `?` thành `%3F`). Token là base64url nên không chứa `.`.
-- Local test dùng plain WS tới `127.0.0.1:23952`.
+- Public: VLESS TCP tới `vn-hn.cldcode.host:23952`, `security=none` — không có endpoint TLS nào forward tới app này; Cloudflare HTTPS trả 404 và forwarder chặn WS.
+- Local/test: WS nội bộ (`127.0.0.1:23952` → Fastify → `23954`) hoặc VLESS TCP qua mux.
+- `vpn_mode: ws` giữ cho inbound nội bộ; `public_transport: tcp` điều khiển URI công khai.
+- Device id chỉ dùng được trên đường WS (nằm trong path); VLESS TCP không mang device id. Xem `CONNECTIVITY_AUDIT.md`.
 - `vpn_mode: tcp` chỉ dùng khi provider có raw TCP thật.
 
 ## Database (SQLite WAL, `database/control.db`)

@@ -51,9 +51,9 @@ async function main() {
   await api(`/api/friend/devices/${DEVICE}`, { method: 'PATCH', cookie, csrf: login.data.csrf, body: { name: 'Lab device' } });
   rec('unknown device before any VPN session', true, 'no device row is fabricated');
 
-  const vpn = await api(`/api/friend/vpn?device=${DEVICE}`, { cookie });
-  const uri = new URL(vpn.data.uri);
-  const wsPath = uri.searchParams.get('path');
+  // Device ID chỉ dùng được trên đường WS nội bộ; public transport hiện là VLESS TCP
+  // (forwarder Cloudcode chặn Upgrade) nên không mang device id. Test này chạy local.
+  const wsPath = `${cdb.getSubscription(friend.id).path}.${DEVICE}`;
   rec('VLESS path carries device identifier', wsPath.endsWith(`.${DEVICE}`), wsPath);
 
   const blobOut = fs.openSync(path.join(RUNTIME, 'device-blob.log'), 'a');

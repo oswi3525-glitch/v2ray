@@ -222,6 +222,38 @@ function setGauge(mbps, label = '') {
   if (label) document.getElementById('gauge-num').textContent = mbpsText(mbps);
 }
 
+function diagPill(status) {
+  const cls = status === 'PASS' ? 'ok' : status === 'FAIL' ? 'bad' : status === 'WARNING' ? 'warn' : '';
+  return `<span class="pill ${cls}">${esc(status)}</span>`;
+}
+function diagnosticsHtml(d) {
+  const rows = d.checks.map((c) => `<div class="diag-item">
+    <div class="diag-head">${diagPill(c.status)}<b>${esc(c.label)}</b><span class="sub">${esc(c.checked_at.slice(11, 19))} · ${c.duration_ms} ms</span></div>
+    <p>${esc(c.detail)}</p>
+    ${c.cause ? `<p class="sub">Nguyên nhân: ${esc(c.cause)}</p>` : ''}
+    ${c.fix ? `<p class="sub">Khắc phục: ${esc(c.fix)}</p>` : ''}
+  </div>`).join('');
+  return `<div class="live-grid">
+    <div class="live-item"><span>PASS</span><b>${d.summary.pass}</b></div>
+    <div class="live-item"><span>FAIL</span><b>${d.summary.fail}</b></div>
+    <div class="live-item"><span>WARNING</span><b>${d.summary.warning}</b></div>
+    <div class="live-item"><span>UNKNOWN</span><b>${d.summary.unknown}</b></div></div>
+    <div class="diag-list">${rows}</div>`;
+}
+async function diagnosticsTab() {
+  let d = await api('/api/diagnostics/run');
+  return { html: `<div class="card"><div class="live-head"><h2>Network Diagnostics</h2>
+      <button id="diag-run">Chạy lại</button></div>
+      <p class="sub">Kiểm tra thật từ máy chủ. Mục không xác minh được từ server sẽ hiện <b>UNKNOWN</b>, không tự đánh dấu PASS.</p>
+      <div class="diag-list" id="diag-result">${diagnosticsHtml(d)}</div></div>`,
+    after: () => document.getElementById('diag-run').onclick = async () => {
+      const box = document.getElementById('diag-result');
+      box.innerHTML = skeleton(3);
+      try { d = await api('/api/diagnostics/run'); box.innerHTML = diagnosticsHtml(d); toast('Đã chạy xong chẩn đoán'); }
+      catch (e) { box.innerHTML = errorState(e.message); }
+    } };
+}
+
 async function friendView() {
   let liveTimer = null;
   let speed = { state: 'IDLE', abort: null, history: [], chart: null };
@@ -428,6 +460,7 @@ async function friendView() {
       <td><button class="small ghost" data-dev="${esc(x.id)}">Đổi tên</button></td></tr>`).join('');
     return { html: `<div class="card"><h2>Active Devices</h2>
       <p class="sub">Thiết bị chỉ được ghi nhận khi có session VPN thật kèm lưu lượng. Đăng nhập web không tạo thiết bị.</p>
+      <p class="sub warn-note">Lưu ý: chế độ public hiện là VLESS TCP (forwarder chặn WebSocket), nên path không mang device id — mục này sẽ trống cho kết nối TCP. Đây là giới hạn của hạ tầng, không phải dữ liệu giả.</p>
       ${d.devices.length ? `<div class="scroll"><table><thead><tr><th>Device ID</th><th>Trạng thái</th><th>Last seen</th><th>Up / Down</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>`
         : emptyState('Chưa có thiết bị', 'Kết nối VPN bằng cấu hình có device ID để xuất hiện ở đây')}
       <p class="sub">Active: có traffic trong 60s gần nhất · Idle: có session nhưng không có traffic · Offline: đã ngắt · Unknown: thiếu dữ liệu.</p></div>`,
@@ -484,7 +517,7 @@ async function friendView() {
   }
 
   const friendBuilders = { 'Overview': overview, 'Data Usage': dataUsage, 'Network Test': networkTest,
-    'Devices': devices, 'Shadowrocket': shadowrocket, 'Settings': settings };
+    'Diagnostics': diagnosticsTab, 'Devices': devices, 'Shadowrocket': shadowrocket, 'Settings': settings };
   mount('Account', friendBuilders, 'Overview');
 }
 
@@ -606,7 +639,7 @@ async function adminView() {
       } };
   }
   const adminBuilders = { 'Overview': overview, 'Users': users, 'Quota': quota, 'Devices': devices,
-    'Monitoring': monitoring, 'Network': network, 'Security': security, 'Settings': settings };
+    'Monitoring': monitoring, 'Network': network, 'Diagnostics': diagnosticsTab, 'Security': security, 'Settings': settings };
   mount('Admin', adminBuilders, 'Overview');
 }
 

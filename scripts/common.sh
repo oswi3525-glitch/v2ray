@@ -12,6 +12,7 @@ fi
 PID_DIR="$ROOT/logs"
 SB_PID="$PID_DIR/sing-box.pid"
 API_PID="$PID_DIR/api.pid"
+MUX_PID="$PID_DIR/port-mux.pid"
 WD_PID="$PID_DIR/watchdog.pid"
 APPLY_LOCK="$PID_DIR/applying.lock"
 MAX_LOG_BYTES="${TIKTUNNEL_MAX_LOG_BYTES:-5242880}"
@@ -37,6 +38,10 @@ sb_pids() {
 
 api_pids() {
   pgrep -f "node $ROOT/control/server.js" 2>/dev/null || true
+}
+
+mux_pids() {
+  pgrep -f "node $ROOT/control/port-mux.js" 2>/dev/null || true
 }
 
 rotate_logs() {

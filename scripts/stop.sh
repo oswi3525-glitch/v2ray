@@ -21,10 +21,12 @@ if [ "${TIKTUNNEL_NO_WATCHDOG:-0}" != "1" ]; then
   stop_by_pidfile "$WD_PID"
 fi
 stop_by_pidfile "$API_PID"
+stop_by_pidfile "$MUX_PID"
 stop_by_pidfile "$SB_PID"
 
 for p in $(sb_pids); do kill "$p" 2>/dev/null || true; done
 for p in $(api_pids); do kill "$p" 2>/dev/null || true; done
+for p in $(mux_pids); do kill "$p" 2>/dev/null || true; done
 
 log_line "all components stopped"
 echo "TikTunnel stopped"

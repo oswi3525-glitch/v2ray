@@ -46,7 +46,7 @@ start_api() {
   setsid nohup node "$ROOT/control/server.js" >> "$ROOT/logs/api.log" 2>&1 < /dev/null &
   echo $! > "$API_PID"
   local port
-  port="$(node -p "require('$ROOT/config/runtime.js').serverPort")"
+  port="$(node -p "require('$ROOT/config/control.json').app_internal_port || 23950")"
   for _ in $(seq 1 40); do
     if curl -fsS -m 1 "http://127.0.0.1:${port}/health" >/dev/null 2>&1; then
       echo "api started (pid $(cat "$API_PID"))"
@@ -56,6 +56,26 @@ start_api() {
     sleep 0.25
   done
   echo "api failed health check"; return 1
+}
+
+start_mux() {
+  if [ -n "$(mux_pids)" ]; then
+    echo "port-mux already running; skipping"
+    return 0
+  fi
+  setsid nohup node "$ROOT/control/port-mux.js" >> "$ROOT/logs/port-mux.log" 2>&1 < /dev/null &
+  echo $! > "$MUX_PID"
+  local port
+  port="$(node -p "require('$ROOT/config/control.json').app_port")"
+  for _ in $(seq 1 40); do
+    if curl -fsS -m 1 "http://127.0.0.1:${port}/health" >/dev/null 2>&1; then
+      echo "port-mux started (pid $(cat "$MUX_PID")) on public $port"
+      log_line "port-mux started"
+      return 0
+    fi
+    sleep 0.25
+  done
+  echo "port-mux failed health check"; return 1
 }
 
 start_watchdog() {
@@ -73,5 +93,6 @@ start_watchdog() {
 ensure_singbox
 start_singbox
 start_api
+start_mux
 start_watchdog
 echo "TikTunnel start complete"

@@ -10,14 +10,14 @@
     "detail": ""
   },
   {
-    "name": "friend limit enforced (max 3)",
+    "name": "friend limit enforced (max 2)",
     "status": "PASS",
     "detail": ""
   },
   {
-    "name": "3 friends exist",
+    "name": "2 friends exist",
     "status": "PASS",
-    "detail": "3"
+    "detail": "2"
   },
   {
     "name": "UUIDs unique",
@@ -31,11 +31,6 @@
   },
   {
     "name": "password set for tiktunnel-user-02",
-    "status": "PASS",
-    "detail": ""
-  },
-  {
-    "name": "password set for friend3",
     "status": "PASS",
     "detail": ""
   },
@@ -67,7 +62,7 @@
   {
     "name": "friend VPN config generated",
     "status": "PASS",
-    "detail": "ws"
+    "detail": "tcp"
   },
   {
     "name": "config file export works",
@@ -115,24 +110,24 @@
     "detail": ""
   },
   {
-    "name": "VLESS URI uses Cloudcode HTTPS endpoint",
+    "name": "VLESS URI uses verified public TCP endpoint",
     "status": "PASS",
-    "detail": "app-medium-1-ac2e.cldcode.host:443"
+    "detail": "vn-hn.cldcode.host:23952"
   },
   {
-    "name": "VLESS URI uses WebSocket + TLS",
+    "name": "VLESS URI uses TCP transport without TLS on public port",
     "status": "PASS",
     "detail": ""
   },
   {
-    "name": "real VLESS/WS traffic through proxy",
+    "name": "real VLESS/TCP traffic through port mux",
     "status": "PASS",
     "detail": "200 8388608"
   },
   {
     "name": "traffic recorded from sing-box path",
     "status": "PASS",
-    "detail": "delta=8388879B"
+    "detail": "delta=8388767B"
   },
   {
     "name": "quota exhaustion enforced",
@@ -161,6 +156,11 @@
   },
   {
     "name": "notifications mark-as-read works",
+    "status": "PASS",
+    "detail": ""
+  },
+  {
+    "name": "network diagnostics returns real results",
     "status": "PASS",
     "detail": ""
   },

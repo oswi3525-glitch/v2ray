@@ -1,9 +1,13 @@
 {
   "app_host": "0.0.0.0",
   "app_port": 23952,
+  "app_internal_port": 23950,
+  "port_mux": true,
   "singbox_ws_host": "127.0.0.1",
   "singbox_ws_port": 23954,
+  "vless_tcp_port": 23955,
   "vpn_mode": "ws",
+  "public_transport": "tcp",
   "singbox_version": "1.14.5",
   "ws_path": "/vpn",
   "public_https_host": "app-medium-1-ac2e.cldcode.host",

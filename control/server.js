@@ -11,15 +11,18 @@ const { WebSocketServer, WebSocket } = require('ws');
 
 const cdb = require('./db');
 const envcfg = require('../config/runtime');
+const { runDiagnostics } = require('./diagnostics');
 const { ROOT } = cdb;
 const control = (() => {
   const c = JSON.parse(fs.readFileSync(path.join(ROOT, 'config', 'control.json'), 'utf8'));
   return {
     ...c,
-    appHost: c.app_host || envcfg.listenHost,
-    appPort: Number(envcfg.serverPort || c.app_port || 23952),
-    publicTcpHost: envcfg.serverHost,
-    publicTcpPort: envcfg.serverPort,
+    appHost: '127.0.0.1',
+    appPort: Number(c.app_port || 23952),
+    internalPort: Number(c.app_internal_port || 23950),
+    publicTcpHost: envcfg.serverHost || c.public_tcp_host,
+    publicTcpPort: Number(envcfg.serverPort || c.public_tcp_port || 23952),
+    publicTransport: c.public_transport || 'ws',
     cookieSecure: c.cookie_secure === true
   };
 })();
@@ -143,7 +146,7 @@ function vlessUri(u, deviceId = null) {
   const s = cdb.getSubscription(u.id);
   if (!v || !s) return null;
   const name = encodeURIComponent(u.display_name);
-  if (control.vpn_mode === 'tcp') {
+  if (control.publicTransport === 'tcp' || control.vpn_mode === 'tcp') {
     return `vless://${v.uuid}@${control.publicTcpHost}:${control.publicTcpPort}?encryption=none&type=tcp&security=none#${name}`;
   }
   const pathValue = s.path + (cdb.validDeviceId(deviceId) ? `.${deviceId}` : '');
@@ -263,6 +266,23 @@ app.get('/api/auth/me', async (req, reply) => {
   return reply.send({ ok: true, role: s.role, csrf: s.csrf, username: u?.username });
 });
 
+app.get('/api/diagnostics/run', async (req, reply) => {
+  const s = sessionFor(req);
+  if (!s) return reply.code(401).send({ ok: false, error: 'unauthorized' });
+  if (rateLimited(req, 'diagnostics', 6, 60000)) return reply.code(429).send({ ok: false, error: 'rate_limited' });
+  const u = s.role === 'admin' ? (cdb.listUsers().find((x) => !x.revoked_at) || null) : cdb.getUser(s.user_id);
+  const checks = await runDiagnostics({ control, user: u, cdb,
+    internalHealthUrl: `http://127.0.0.1:${control.internalPort}/health` });
+  cdb.securityEvent(s.role, 'diagnostics_run', String(s.user_id), req.ip);
+  return reply.header('Cache-Control', 'no-store').send({ ok: true, checks,
+    summary: {
+      pass: checks.filter((c) => c.status === 'PASS').length,
+      fail: checks.filter((c) => c.status === 'FAIL').length,
+      warning: checks.filter((c) => c.status === 'WARNING').length,
+      unknown: checks.filter((c) => c.status === 'UNKNOWN').length
+    } });
+});
+
 app.get('/api/notifications', async (req, reply) => {
   const s = sessionFor(req);
   if (!s) return reply.code(401).send({ ok: false, error: 'unauthorized' });
@@ -282,8 +302,8 @@ app.get('/api/admin/overview', async (req, reply) => {
   const st = systemStats();
   return reply.send({
     ok: true,
-    mode: control.vpn_mode,
-    public_endpoint: control.vpn_mode === 'ws' ? `${control.public_https_host}:443` : `${control.publicTcpHost}:${control.publicTcpPort}`,
+    mode: control.publicTransport,
+    public_endpoint: `${control.publicTcpHost}:${control.publicTcpPort}`,
     server: { sing_box: processAlive(readPid('sing-box.pid')), api: true, ...st },
     accounts: { friends: cdb.friendCount(), max_friends: envcfg.maxUsers, admin: cdb.adminExists() },
     vpn_users: cdb.activeVpnUsers().length,
@@ -434,7 +454,7 @@ app.get('/api/friend/usage', async (req, reply) => {
 });
 app.get('/api/friend/vpn', async (req, reply) => {
   const a = guard(req, reply, 'friend'); if (!a) return;
-  return reply.send({ ok: true, uri: vlessUri(a.user, req.query.device), mode: control.vpn_mode, active: cdb.activeVpnUsers().some((u) => u.id === a.user.id) });
+  return reply.send({     ok: true, uri: vlessUri(a.user, req.query.device), mode: control.publicTransport, active: cdb.activeVpnUsers().some((u) => u.id === a.user.id) });
 });
 app.get('/api/friend/import', async (req, reply) => {
   const a = guard(req, reply, 'friend'); if (!a) return;
@@ -447,8 +467,11 @@ app.get('/api/friend/import', async (req, reply) => {
   const s = cdb.getSubscription(u.id);
   const uri = vlessUri(u, deviceId);
   if (!s || !uri) return reply.code(409).send({ ok: false, error: 'config_not_ready' });
-  const origin = control.public_https_host ? `https://${control.public_https_host}` : `${req.protocol}://${req.headers.host}`;
-  const subUrl = `${origin}/api/sub/${s.token}${deviceId ? `?device=${deviceId}` : ''}`;
+  const tcpPublic = control.publicTransport === 'tcp';
+  const origin = tcpPublic
+    ? `http://${control.publicTcpHost}:${control.publicTcpPort}`
+    : (control.public_https_host ? `https://${control.public_https_host}` : `${req.protocol}://${req.headers.host}`);
+  const subUrl = `${origin}/api/sub/${s.token}${deviceId && !tcpPublic ? `?device=${deviceId}` : ''}`;
   const remark = String(u.display_name || u.username).replace(/[^\p{L}\p{N} ._-]/gu, '').slice(0, 40) || 'TikTunnel';
   const serverReady = processAlive(readPid('sing-box.pid'));
   cdb.securityEvent('friend', 'import_link_issued', String(u.id), req.ip, `mode=${control.vpn_mode}`);
@@ -863,8 +886,8 @@ async function main() {
     process.stderr.write(`control failed: could not seed admin from .env: ${e.message}\n`);
     process.exit(1);
   }
-  await app.listen({ host: control.appHost, port: control.appPort });
-  process.stdout.write(`tiktunnel-control listening on ${control.appHost}:${control.appPort} mode=${control.vpn_mode}\n`);
+  await app.listen({ host: control.appHost, port: control.internalPort });
+  process.stdout.write(`tiktunnel-control listening on ${control.appHost}:${control.internalPort} public=${control.appPort} mode=${control.publicTransport}\n`);
   setInterval(enforceQuota, Number(control.quota_check_ms || 10000)).unref();
   setInterval(() => {
     const s = systemStats();

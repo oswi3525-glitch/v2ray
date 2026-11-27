@@ -84,6 +84,11 @@ tbody tr:hover{background:var(--panel2)}
 .skeleton-wrap{display:grid;gap:10px}
 .skeleton{height:70px;border-radius:10px;background:var(--panel);border:1px solid var(--line);animation:pulse 1.4s ease-in-out infinite}
 @keyframes pulse{50%{opacity:.45}}
+.diag-list{display:grid;gap:8px;margin-top:12px}
+.diag-item{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:11px 12px}
+.diag-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.diag-head b{font-size:14px}
+.diag-item p{margin:6px 0 0;font-size:13px}
 .badge{display:inline-grid;place-items:center;min-width:18px;height:18px;padding:0 5px;margin-left:4px;border-radius:999px;background:var(--err);color:#fff;font-size:11px;font-weight:700}
 .notif-panel{position:absolute;right:14px;top:64px;width:min(360px,calc(100vw - 28px));max-height:60vh;overflow:auto;background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);box-shadow:0 18px 45px #0005;padding:10px;z-index:15}
 .notif-panel[hidden]{display:none}

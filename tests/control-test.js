@@ -97,9 +97,11 @@ async function main() {
 
   const devId = 'aB3xY9kLmN2pQ7rS';
   const imp = await api(`/api/friend/import?device=${devId}`, { cookie: f1.cookie });
+  const impUri = new URL(imp.data.uri || 'vless://invalid');
   check('Shadowrocket import links issued', imp.status === 200 && imp.data.ready &&
     String(imp.data.links.node).startsWith('shadowrocket://add/vless://') &&
-    String(imp.data.links.subscription).startsWith('sub://') && String(imp.data.uri).includes(`.${devId}`));
+    String(imp.data.links.subscription).startsWith('sub://') &&
+    impUri.hostname === cfg.public_tcp_host && impUri.port === String(cfg.app_port));
   const ping = await api('/api/net/ping', { cookie: f1.cookie });
   const dl = await fetch(BASE + '/api/net/download?bytes=262144', { headers: { cookie: f1.cookie } });
   const dlBuf = Buffer.from(await dl.arrayBuffer());
@@ -124,22 +126,21 @@ async function main() {
   f1.cookie = rot.cookie;
 
   const parsed = new URL(fvpn.data.uri);
-  check('VLESS URI uses Cloudcode HTTPS endpoint', parsed.hostname === cfg.public_https_host && parsed.port === '443', `${parsed.hostname}:${parsed.port}`);
-  check('VLESS URI uses WebSocket + TLS', parsed.searchParams.get('type') === 'ws' && parsed.searchParams.get('security') === 'tls');
-  const path2 = parsed.searchParams.get('path');
+  check('VLESS URI uses verified public TCP endpoint', parsed.hostname === cfg.public_tcp_host && parsed.port === String(cfg.app_port), `${parsed.hostname}:${parsed.port}`);
+  check('VLESS URI uses TCP transport without TLS on public port',
+    parsed.searchParams.get('type') === 'tcp' && parsed.searchParams.get('security') === 'none');
 
   const blobOut = fs.openSync(path.join(RUNTIME, 'control-blob.log'), 'a');
   const blob = spawn('python3', [path.join(ROOT, 'tests', 'blob-server.py')], { cwd: ROOT, detached: true, stdio: ['ignore', blobOut, blobOut] });
   blob.unref();
   await sleep(1800);
 
-  function startClient(idx, tokenPath) {
+  function startClient(idx) {
     const f = path.join(RUNTIME, `control-client-${idx}.json`);
     fs.writeFileSync(f, JSON.stringify({
       log: { level: 'error', output: path.join(RUNTIME, `control-client-${idx}.log`) },
       inbounds: [{ type: 'socks', tag: 's', listen: '127.0.0.1', listen_port: 18700 + idx }],
-      outbounds: [{ type: 'vless', tag: 'p', server: '127.0.0.1', server_port: cfg.app_port, uuid: users[idx].uuid,
-        transport: { type: 'ws', path: tokenPath } }],
+      outbounds: [{ type: 'vless', tag: 'p', server: '127.0.0.1', server_port: cfg.app_port, uuid: users[idx].uuid }],
       route: { rules: [], final: 'p' }
     }), { mode: 0o600 });
     const o = fs.openSync(path.join(RUNTIME, `control-client-${idx}-stdout.log`), 'a');
@@ -147,15 +148,15 @@ async function main() {
     p.unref();
     return p.pid;
   }
-  const p1 = startClient(0, cdb.getSubscription(users[0].id).path);
-  const p2 = startClient(1, path2);
+  const p1 = startClient(0);
+  const p2 = startClient(1);
   await sleep(2000);
 
   await api(`/api/admin/users/${users[1].id}/quota`, { method: 'POST', cookie: admin.cookie, csrf: admin.csrf, body: { action: 'set', gb: 5 } });
   const before = cdb.getUser(users[1].id);
   const r1 = curlVia(18701, 'http://127.0.0.1:18082/blob.bin');
-  check('real VLESS/WS traffic through proxy', r1.ok, r1.out);
-  await sleep(1200);
+  check('real VLESS/TCP traffic through port mux', r1.ok, r1.out);
+  await sleep(2600);
   const after = cdb.getUser(users[1].id);
   check('traffic recorded from sing-box path', (after.used_upload + after.used_download) > (before.used_upload + before.used_download),
     `delta=${after.used_upload + after.used_download - before.used_upload - before.used_download}B`);
@@ -176,6 +177,9 @@ async function main() {
   check('notifications delivered from real events', notif.status === 200 && notif.data.items.some((n) => n.type === 'quota') && notif.data.unread > 0);
   const notifRead = await api('/api/notifications/read', { method: 'POST', cookie: f1.cookie, csrf: rot.data.csrf, body: {} });
   check('notifications mark-as-read works', notifRead.status === 200 && notifRead.data.unread === 0);
+  const diag = await api('/api/diagnostics/run', { cookie: f1.cookie });
+  check('network diagnostics returns real results', diag.status === 200 && diag.data.checks.length === 9 &&
+    diag.data.checks.some((c) => c.id === 'subscription') && diag.data.checks.some((c) => c.id === 'client_connectivity'));
 
   execFileSync('bash', [path.join(ROOT, 'scripts', 'restart.sh')], { cwd: ROOT, stdio: 'ignore' });
   await sleep(1500);

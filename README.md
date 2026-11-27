@@ -2,7 +2,7 @@
 
 Rootless VPN control panel: admin + up to `MAX_USERS` friends, per-user quota from **real VPN traffic**, live data/speed dashboard, Device Activity, real Network Test, and one-tap Shadowrocket import. Node/Fastify + SQLite (`node:sqlite`) + sing-box VLESS-over-WebSocket.
 
-> **Trạng thái:** chạy ổn định local (E2E 36/36, Device Activity 7/7). Đường public Cloudcode/Cloudflare **chưa xác minh end-to-end**: WS upgrade qua HTTPS subdomain trả `404`, chưa có iPhone thật để test Shadowrocket. Xem `reports/cloudcode-audit.md` và `SHADOWROCKET_IMPORT.md`.
+> **Trạng thái quan trọng:** E2E 36/36 PASS, VLESS TCP thật 8 MiB qua port-mux (local). Endpoint public `vn-hn.cldcode.host:23952` hiện là **deployment khác DB/admin** nên UUID/token local không tồn tại ở đó — Shadowrocket sẽ báo lỗi máy chủ cho tới khi deploy đúng account lên host public. Cloudflare HTTPS trả 404 và forwarder chặn WebSocket. Xem `CONNECTIVITY_AUDIT.md`.
 
 ## Yêu cầu
 
@@ -41,7 +41,9 @@ Startup command cho Pterodactyl/Cloudcode xem `INSTALL.md`.
 - **Notifications:** bell trên header với badge chưa đọc, dropdown và "Đã đọc tất cả" (sự kiện quota/password/device/account).
 - **Admin:** Overview, User Management, Quota, Device Activity, Server Monitoring, Network Performance, Security Events, Settings.
 - **Friend:** Overview (GB + tốc độ live), Data Usage, Network Test (gauge + ping/jitter/loss/down/up), Active Devices, Shadowrocket import, Account Settings.
-- **Shadowrocket:** `GET /api/friend/import` xác thực session + quota + sing-box, trả `shadowrocket://add/<vless-uri>` và `sub://<base64(sub-url)>#remark`; copy/file/subscription làm fallback.
+- **Shadowrocket:** VLESS TCP trên port public 23952 (forwarder chặn WS); `GET /api/friend/import` xác thực session + quota + sing-box, trả `shadowrocket://add/<vless-uri>` và `sub://<base64(sub-url)>#remark`; copy/file/subscription làm fallback. Giữ bước xác nhận trong app.
+- **Network Diagnostics:** 9 hạng mục thật (DNS/TCP/TLS/WS/VLESS/Auth/Subscription/Server/Client) với trạng thái, thời gian, nguyên nhân và cách sửa; `UNKNOWN` khi không thể kiểm chứng.
+- **Port mux:** `control/port-mux.js` chia HTTP (dashboard/API) và VLESS TCP trên cùng port public, đồng thời ghi lưu lượng thật theo UUID vào DB.
 - **Devices:** định danh bằng `<subscription-token>.<device-id>` trong WS path; Active/Idle/Offline/Unknown tính từ traffic thật.
 - **Speed test:** endpoint truyền dữ liệu thật, có giới hạn (≤8 MB/lần tải, ≤2 MB/lần gửi), lịch sử tối đa 100 bản ghi/user.
 
@@ -60,4 +62,4 @@ npm audit --audit-level=low           # 0 vulnerabilities
 
 ## Tài liệu
 
-`CHANGELOG.md`, `ARCHITECTURE.md`, `SECURITY_AUDIT.md`, `SHADOWROCKET_IMPORT.md`, `NETWORK_TEST.md`, `DEVICE_ACTIVITY.md`, `PERFORMANCE_REPORT.md`, `UI_UX_REPORT.md`, `API.md`, `DATABASE.md`, `INSTALL.md`, `TROUBLESHOOTING.md`, `reports/*`.
+`CONNECTIVITY_AUDIT.md` (báo cáo điều tra lỗi kết nối), `CHANGELOG.md`, `ARCHITECTURE.md`, `SECURITY_AUDIT.md`, `SHADOWROCKET_IMPORT.md`, `NETWORK_TEST.md`, `DEVICE_ACTIVITY.md`, `PERFORMANCE_REPORT.md`, `UI_UX_REPORT.md`, `API.md`, `DATABASE.md`, `INSTALL.md`, `TROUBLESHOOTING.md`, `reports/*`.

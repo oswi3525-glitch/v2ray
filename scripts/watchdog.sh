@@ -5,9 +5,11 @@ set -u
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
 PORT="$(node -p "require('$ROOT/config/control.json').singbox_ws_port")"
-APORT="$(node -p "require('$ROOT/config/runtime.js').serverPort")"
+APORT="$(node -p "require('$ROOT/config/control.json').app_internal_port || 23950")"
+MPORT="$(node -p "require('$ROOT/config/control.json').app_port")"
 SB_FAIL=0
 API_FAIL=0
+MUX_FAIL=0
 
 restart_singbox_only() {
   local p
@@ -29,7 +31,7 @@ restart_singbox_only() {
 while true; do
   sleep 20
   rotate_logs
-  [ -f "$APPLY_LOCK" ] && { SB_FAIL=0; API_FAIL=0; continue; }
+  [ -f "$APPLY_LOCK" ] && { SB_FAIL=0; API_FAIL=0; MUX_FAIL=0; continue; }
 
   if [ -z "$(sb_pids)" ] || ! port_listening "$PORT"; then
     SB_FAIL=$((SB_FAIL + 1))
@@ -41,6 +43,12 @@ while true; do
     API_FAIL=$((API_FAIL + 1))
   else
     API_FAIL=0
+  fi
+
+  if [ -z "$(mux_pids)" ] || ! port_listening "$MPORT"; then
+    MUX_FAIL=$((MUX_FAIL + 1))
+  else
+    MUX_FAIL=0
   fi
 
   if [ "$SB_FAIL" -ge 2 ]; then
@@ -56,5 +64,13 @@ while true; do
     setsid nohup node "$ROOT/control/server.js" >> "$ROOT/logs/api.log" 2>&1 < /dev/null &
     echo $! > "$API_PID"
     API_FAIL=0
+  fi
+
+  if [ "$MUX_FAIL" -ge 2 ]; then
+    printf '[%s] watchdog: port-mux down, restarting\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$ROOT/logs/watchdog.log"
+    for x in $(mux_pids); do kill "$x" 2>/dev/null || true; done
+    setsid nohup node "$ROOT/control/port-mux.js" >> "$ROOT/logs/port-mux.log" 2>&1 < /dev/null &
+    echo $! > "$MUX_PID"
+    MUX_FAIL=0
   fi
 done

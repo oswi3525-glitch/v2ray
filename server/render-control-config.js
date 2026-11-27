@@ -8,31 +8,30 @@ const cfgEnv = require('../config/runtime');
 const control = JSON.parse(fs.readFileSync(path.join(cdb.ROOT, 'config', 'control.json'), 'utf8'));
 const mode = control.vpn_mode || 'ws';
 
-const users = mode === 'ws'
-  ? cdb.activeVpnUsers().map((u) => ({ name: u.username, uuid: u.uuid, flow: '' }))
-  : [];
+const users = cdb.activeVpnUsers().map((u) => ({ name: u.username, uuid: u.uuid, flow: '' }));
+
+const inbounds = [
+  {
+    type: 'vless',
+    tag: 'vless-ws-in',
+    listen: control.singbox_ws_host,
+    listen_port: Number(control.singbox_ws_port),
+    users,
+    transport: { type: 'ws', path: control.ws_path }
+  },
+  {
+    type: 'vless',
+    tag: 'vless-tcp-in',
+    listen: '127.0.0.1',
+    listen_port: Number(control.vless_tcp_port || 23955),
+    users
+  }
+];
 
 const cfg = {
   log: { level: 'warn', timestamp: true, output: path.join(cdb.ROOT, 'logs', 'sing-box.log') },
   dns: { servers: [{ type: 'local', tag: 'local-dns' }] },
-  inbounds: [
-    mode === 'ws'
-      ? {
-          type: 'vless',
-          tag: 'vless-ws-in',
-          listen: control.singbox_ws_host,
-          listen_port: Number(control.singbox_ws_port),
-          users,
-          transport: { type: 'ws', path: control.ws_path }
-        }
-      : {
-          type: 'vless',
-          tag: 'vless-tcp-in',
-          listen: cfgEnv.listenHost,
-          listen_port: cfgEnv.serverPort,
-          users
-        }
-  ],
+  inbounds,
   outbounds: [{ type: 'direct', tag: 'direct' }, { type: 'block', tag: 'block' }],
   route: { rules: [], final: 'direct' }
 };
