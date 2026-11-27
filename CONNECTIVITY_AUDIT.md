@@ -82,6 +82,20 @@ Không thực hiện giả mạo SNI/Host/DNS/domain fronting, không ngụy tra
 
 Kết quả đo thực tế trên SIM Viettel/TikTok vẫn **chưa có** — cần người dùng chạy công cụ trên thiết bị thật. Không tuyên bố “Internet miễn phí”.
 
+### Nghiên cứu điều khoản (nguồn công khai, cập nhật 23–27/10/2026)
+
+| Nguồn | Nội dung liên quan |
+|---|---|
+| vietteldata.vn — T15K/T50K | “Data riêng cho TikTok · không có Data ngoài”; “Data TikTok chỉ dùng trong ứng dụng TikTok; mở link TikTok qua trình duyệt hoặc ứng dụng khác sẽ trừ Data thường.” |
+| vietteldata.vn — MXH100 | Free TikTok/YouTube/Facebook trong app + 1GB/ngày data thường; lưu lượng ngoài app dùng data thường. |
+| speednet.vn (23/11/2026) | MXH100 1GB/ngày + free MXH; MXH130 1.5GB/ngày + 20GB/hướng; MXH160 3GB/ngày + 30GB/hướng; “phát Wi-Fi … có người dùng thấy bị trừ data chung”. |
+| 3gviettel.com.vn (04/05/2026) | Ưu đãi chỉ khi dùng **app chính thức từ App Store/Google Play**, SIM đăng ký gói, có sóng; phát Wi-Fi cho máy khác trừ data thường. |
+| vienthonghue.com.vn (20/10/2026) | “Nên … **tắt chế độ VPN, vì kết nối qua VPN có thể khiến hệ thống không nhận ra lưu lượng thuộc ứng dụng được miễn phí**.” |
+| 5gviettel.vn (19/12/2025) | Không có gói 5G TikTok vô hạn; miễn phí là data riêng có hạn (20–50GB), xem qua trình duyệt/phát Wi-Fi trừ data chung. |
+| ungdung.toeic123.vn (01/10/2026) | “Khi đang bật VPN, nhà mạng có thể không nhận ra ứng dụng, dữ liệu sẽ tính như truy cập thường.” |
+
+**Kết luận nghiên cứu:** mọi nguồn đều giới hạn ưu đãi ở **app TikTok chính thức trên máy lắm SIM**. Không có nguồn nào cho phép kết luận lưu lượng VPN TikTunnel được tính vào data TikTok. Bật VPN làm mất nhận diện ưu đãi. Do đó **không có phương án cấu hình hợp lệ** để TikTunnel chạy bằng gói TikTok đơn lẻ; chỉ có data thường (hoặc gói MXH có quỹ data thường) mới dùng được. Không thực hiện giả mạo SNI/Host/DNS/domain fronting.
+
 ## 8. Giới hạn do Cloudcode / nhà mạng
 
 - Không có Cloudcode CLI/API/SSH/metadata trong workspace; không đổi được port mapping hay deploy lên host public.

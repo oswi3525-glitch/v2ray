@@ -18,9 +18,21 @@
     <h2>Công cụ đo khả năng truy cập</h2>
     <p class="sub">Chạy trang này <b>trên chính SIM cần kiểm tra và khi VPN đang TẮT</b>. Các phép đo được thực hiện thật từ trình duyệt, không có dữ liệu giả.</p>
     <p class="sub warn-note">Công cụ chỉ đo kết nối. Không giả mạo SNI/Host/DNS hay lưu lượng TikTok, không bypass hệ thống tính cước của nhà mạng, và không khẳng định VPN “miễn phí data” khi chưa có bằng chứng từ nhà mạng.</p>
-    <div class="row"><button id="run">Chạy kiểm tra</button><button class="ghost" id="clear">Xóa kết quả</button></div>
+    <label class="check"><input type="checkbox" id="vpn-off"> Tôi xác nhận đang dùng SIM cần kiểm tra và <b>VPN đang TẮT</b></label>
+    <div class="row"><button id="run">Chạy kiểm tra</button><button class="ghost" id="export">Xuất JSON</button><button class="ghost" id="clear">Xóa kết quả</button><button class="ghost" id="clear-history">Xóa lịch sử</button></div>
+    <p class="sub">Mỗi phép đo lặp 3 lần để giảm nhiễu. Kết quả được lưu trên chính thiết bị này (localStorage), không gửi về server.</p>
   </div>
   <div class="card"><h2>Kết quả</h2><div id="result"></div></div>
+  <div class="card"><h2>Lịch sử đo trên thiết bị</h2><div id="history"></div></div>
+  <div class="card"><h2>Những gì nghiên cứu được về gói TikTok Viettel (2026)</h2>
+    <ul class="steps">
+      <li>T15K (25GB/7 ngày) và T50K (50GB/30 ngày): data riêng <b>chỉ cho ứng dụng TikTok chính thức</b> trên máy lắm SIM; không có data cho web/app khác.</li>
+      <li>MXH100/MXH130/MXH160: miễn data TikTok/YouTube/Facebook <b>khi dùng trong app</b>, kèm quỹ data thường (1–3GB/ngày tùy gói).</li>
+      <li>Nhiều nguồn đại lý Viettel nêu rõ: xem qua trình duyệt, phát Wi-Fi cho máy khác, hoặc <b>bật VPN</b> → nhà mạng không nhận diện được lưu lượng thuộc app ưu đãi, sẽ trừ data thường.</li>
+      <li>Vì vậy không có cấu hình VPN hợp lệ nào biến lưu lượng TikTunnel thành “data TikTok”. Công cụ này chỉ đo để bạn có bằng chứng thực trước khi quyết định dùng gói Internet thông thường.</li>
+    </ul>
+    <p class="sub">Nguồn: các trangInfo tổng hợp gói cước Viettel cập nhật 23–27/10/2026 (vietteldata.vn, speednet.vn, 3gviettel.com.vn, 5gviettel.vn). Tin nhắn xác nhận từ Viettel là căn cứ cuối cùng.</p>
+  </div>
   <div class="card"><h2>Cách đọc kết quả</h2>
     <ol class="steps">
       <li><b>TikTok OK · Internet thường FAIL</b> → thiết bị đang ở trạng thái gói TikTok đơn lẻ.</li>
