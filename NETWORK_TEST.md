@@ -6,11 +6,11 @@ Trang **Network Test** trong Friend Dashboard đo bằng dữ liệu thật tớ
 
 | Chỉ số | Nguồn | Công thức |
 |---|---|---|
-| Ping | 8 request `GET /api/net/ping` (client timing) | `min(samples)` ms |
-| Jitter | cùng 8 samples | trung bình `abs(sample[i] - sample[0])` |
-| Packet loss | số request timeout/lỗi | `lost / 8 * 100` |
-| Download | 4 × `GET /api/net/download?bytes=1048576` | `bytes * 8 / elapsed / 1e6` Mbps mỗi chunk |
-| Upload | 4 × `POST /api/net/upload` (256 KiB random bytes) | `bytes * 8 / elapsed / 1e6` Mbps mỗi chunk |
+| Ping | 10 request `GET /api/net/ping`, bỏ mẫu đầu (lạnh) | `median(samples[1..])` ms |
+| Jitter | các mẫu còn lại | trung bình `abs(sample[i] - sample[i-1])` (IPDV giữa 2 mẫu liên tiếp) |
+| Packet loss | số request timeout/lỗi | `lost / 10 * 100` |
+| Download | 1 chunk khởi động + 5 chunk `GET /api/net/download?bytes=1048576` | `median(bytes * 8 / elapsed / 1e6)` Mbps; đối chiếu `X-Payload-Bytes` |
+| Upload | 1 chunk khởi động + 5 chunk `POST /api/net/upload` (256 KiB random bytes) | `median(bytes * 8 / elapsed / 1e6)` Mbps |
 | Test duration | `performance.now()` từ READY → COMPLETED | giây |
 | Test server | cố định `TikTunnel endpoint` | — |
 
@@ -18,9 +18,9 @@ Gauge SVG và đường biểu diễn cập nhật theo từng chunk (không ch�
 
 ## 2. Giới hạn dữ liệu & an toàn
 
-- Download tối đa **8 MiB/request** (mặc định 1 MiB), upload **2 MiB/request**; bài test dùng ~5 MiB (4 MiB tải + 1 MiB gửi).
+- Download tối đa **8 MiB/request** (mặc định 1 MiB), upload **2 MiB/request**; bài test truyền ~6 MiB tải + 1.5 MiB gửi (đã tính cả chunk khởi động, vẫn trừ vào quota nếu đi qua VPN). Payload server được cache theo kích thước để không tốn CPU tạo lại mỗi lần.
 - Rate limit: ping 120/phút, download 30/phút, upload 30/phút, lưu kết quả 20/phút.
-- Modal cảnh báo trước khi bắt đầu: "~5 MB, sẽ trừ vào quota nếu đi qua VPN".
+- Modal cảnh báo trước khi bắt đầu: "~7.5 MB, sẽ trừ vào quota nếu đi qua VPN".
 - UI hiển thị dung lượng đã dùng của chính bài test (tải/gửi riêng).
 - Lịch sử tối đa 100 bản ghi/user (`purgeSpeedTests`), API phân trang `limit/offset`.
 - Endpoint chạy trong cùng process Fastify nhưng tách route, bodyLimit riêng; không làm thay đổi API quản trị.

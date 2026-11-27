@@ -1,5 +1,22 @@
 # CHANGELOG.md
 
+## 2.3.0 — Đo data chuẩn hơn, định danh thiết bị, ổn định đường chuyền
+
+### Added
+- `tiktokv.com`: probe thật DNS → TCP → TLS(chứng chỉ hợp lệ) → HTTP trong `GET /api/diagnostics/run` (10 hạng mục) và trong trang "Kiểm tra gói cước"; `npm run test:tiktok` đo lặp lại và in JSON.
+- `POST /api/friend/devices/register` (CSRF): đăng ký `platform/kind/agent_hash/client_version`; **không lưu User-Agent thô**, chỉ hash ngắn.
+- WS proxy: heartbeat ping/pong 30s để phát hiện và đóng connection chết.
+- Migration v6: cột `platform`, `kind`, `agent_hash`, `client_version` trên `devices` (không reset dữ liệu cũ).
+
+### Changed
+- Network Test: 10 ping (bỏ mẫu lạnh), **jitter = trung bình |diff| giữa các mẫu liên tiếp**, 1 chunk khởi động + 5 chunk đo cho tải/gửi, lấy **median** thay vì chunk cuối; kiểm tra `X-Payload-Bytes` đối chiếu payload tải về. Cache payload server theo kích thước.
+- Port mux: gom header VLESS đến đủ 18+ byte trước khi phân loại (header chia gói vẫn nhận diện đúng UUID), **trừ độ dài header VLESS** khỏi byte tính quota, flush một lần khi đóng, giới hạn `mux_max_connections`, dùng chế độ `readable` tương thích `pauseOnConnect`.
+
+### Verified
+- `npm test`: **38/38 PASS** (thêm check Đăng ký thiết bị + probe tiktokv.com).
+- `npm run test:tiktok`: DNS 9 IP, TCP 3.9–6.3 ms, TLSv1.3 cert `*.tiktokv.com` hợp lệ, HTTP 404 (CDN trả lời thật) RTT median 15.4 ms.
+- `bash scripts/restart.sh`: start/stop sạch, health-check mux 200.
+
 ## 2.2.0 — Connectivity fix: VLESS TCP over port mux + real diagnostics
 
 ### Added

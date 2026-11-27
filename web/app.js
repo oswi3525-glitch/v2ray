@@ -59,6 +59,7 @@ function randomId() {
   crypto.getRandomValues(bytes);
   return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
 }
+const CLIENT_VERSION = '2.2.0';
 function deviceId() {
   let id = localStorage.getItem('tiktunnel_device_id');
   if (!id || !/^[A-Za-z0-9_-]{8,64}$/.test(id)) {
@@ -66,6 +67,34 @@ function deviceId() {
     localStorage.setItem('tiktunnel_device_id', id);
   }
   return id;
+}
+function agentHash(ua) {
+  const fnv = (s) => {
+    let h = 2166136261;
+    for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; }
+    return h.toString(16).padStart(8, '0');
+  };
+  return fnv(ua) + fnv(ua.split('').reverse().join(''));
+}
+function deviceProfile() {
+  const ua = navigator.userAgent || '';
+  const hints = navigator.userAgentData || {};
+  const brand = (hints.brands || []).map((b) => b.brand).find((b) => !/Not.?A.?Brand/i.test(b));
+  const browser = brand || (ua.match(/(Edg|OPR|Chrome|Firefox|Safari)\/[\d.]+/) || [])[1] || 'Browser';
+  const platform = hints.platform || (/iPhone|iPad|iPod/i.test(ua) ? 'iOS'
+    : /Android/i.test(ua) ? 'Android'
+    : /Windows/i.test(ua) ? 'Windows'
+    : /Mac OS X/i.test(ua) ? 'macOS'
+    : /Linux/i.test(ua) ? 'Linux' : 'Unknown');
+  const kind = /iPad|Tablet/i.test(ua) ? 'tablet'
+    : /iPhone|Android/i.test(ua) ? 'mobile' : 'desktop';
+  return { name: `${platform} · ${browser}`.slice(0, 40), platform, kind,
+    agent_hash: agentHash(ua), client_version: CLIENT_VERSION };
+}
+function registerCurrentDevice(id) {
+  return api('/api/friend/devices/register', {
+    method: 'POST', body: JSON.stringify({ id, ...deviceProfile() })
+  }).catch(() => {});
 }
 function openDeepLink(url) {
   const a = document.createElement('a');
@@ -259,6 +288,7 @@ async function friendView() {
   let liveTimer = null;
   let speed = { state: 'IDLE', abort: null, history: [], chart: null };
   const dev = deviceId();
+  registerCurrentDevice(dev);
 
   async function overview() {
     const [u, l] = await Promise.all([api('/api/friend/me'), api('/api/friend/live')]);
@@ -327,7 +357,7 @@ async function friendView() {
       </div>
       <canvas id="speed-chart" height="110"></canvas>
       <div class="row"><button id="test-start">START TEST</button><button class="ghost" id="test-stop" disabled>STOP TEST</button><button class="ghost" id="test-again" disabled>TEST AGAIN</button></div>
-      <p class="sub" id="test-bytes">Dữ liệu sẽ dùng: ~5 MB (4 MB tải + 1 MB gửi)</p>
+      <p class="sub" id="test-bytes">Dữ liệu sẽ dùng: ~7.5 MB (6 MB tải + 1.5 MB gửi, gồm chunk khởi động)</p>
     </div>`, after: () => { panelCleanup = () => speed.abort?.abort(); bindSpeedTest(); } };
   }
 
@@ -358,8 +388,8 @@ async function friendView() {
       ] }, options: { responsive: true, animation: false, plugins: { legend: { labels: { color: '#8ea1b5' } } }, scales: { x: { ticks: { color: '#8ea1b5' } }, y: { ticks: { color: '#8ea1b5' } } } } });
     }
     document.getElementById('test-start').onclick = () => modal('Bắt đầu đo tốc độ',
-      `<p>Bài test truyền <b>~5 MB</b> dữ liệu thật (4 MB tải + 1 MB gửi) tới endpoint TikTunnel.</p>
-       <p class="sub">Nếu đang đi qua VPN, ~5 MB này sẽ được trừ vào quota tài khoản.</p>`,
+      `<p>Bài test truyền <b>~7.5 MB</b> dữ liệu thật (6 MB tải + 1.5 MB gửi, gồm chunk khởi động) tới endpoint TikTunnel.</p>
+       <p class="sub">Nếu đang đi qua VPN, ~7.5 MB này sẽ được trừ vào quota tài khoản.</p>`,
       'Bắt đầu', () => runTest(mode));
     document.getElementById('test-stop').onclick = () => { speed.abort?.abort(); setTestState('FAILED'); toast('Đã dừng bài test'); };
     document.getElementById('test-again').onclick = () => runTest(mode);
@@ -372,77 +402,98 @@ async function friendView() {
     if (speed.chart.data.labels.length > 40) { speed.chart.data.labels.shift(); speed.chart.data.datasets.forEach(d => d.data.shift()); }
     speed.chart.update('none');
   }
+  const median = (a) => {
+    if (!a.length) return 0;
+    const s = [...a].sort((x, y) => x - y);
+    const m = Math.floor(s.length / 2);
+    return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+  };
   async function runTest(mode) {
     if (speed.abort) speed.abort.abort();
     speed.abort = new AbortController();
     const signal = speed.abort.signal;
     speed.history = [];
     setGauge(0, true);
-    document.getElementById('t-ping').textContent = '—';
-    document.getElementById('t-jitter').textContent = '—';
-    document.getElementById('t-loss').textContent = '—';
-    document.getElementById('t-down').textContent = '—';
-    document.getElementById('t-up').textContent = '—';
-    document.getElementById('t-meta').textContent = '—';
+    for (const id of ['t-ping', 't-jitter', 't-loss', 't-down', 't-up', 't-meta']) {
+      document.getElementById(id).textContent = '—';
+    }
     let bytesUsed = 0, pingMs = 0, jitterMs = 0, loss = 0, down = 0, up = 0;
     const started = performance.now();
+    const PINGS = 10, CHUNKS = 5, DL_SIZE = 1024 * 1024;
     try {
       setTestState('READY');
       setTestState('PING_TEST');
       const samples = []; let lost = 0;
-      for (let i = 0; i < 8 && !signal.aborted; i++) {
+      for (let i = 0; i < PINGS && !signal.aborted; i++) {
         const t0 = performance.now();
-        try { await fetch(`/api/net/ping?i=${i}&t=${Date.now()}`, { cache: 'no-store', signal }); samples.push(performance.now() - t0); }
-        catch { lost++; }
+        try {
+          await fetch(`/api/net/ping?i=${i}&t=${Date.now()}`, { cache: 'no-store', signal });
+          samples.push(performance.now() - t0);
+        } catch { lost++; }
       }
       if (signal.aborted) throw new Error('aborted');
-      pingMs = samples.length ? Math.min(...samples) : 0;
-      jitterMs = samples.length > 1 ? samples.reduce((a, b) => a + Math.abs(b - samples[0]), 0) / samples.length : 0;
-      loss = lost / 8 * 100;
+      const rtt = samples.slice(1);
+      pingMs = rtt.length ? median(rtt) : 0;
+      jitterMs = rtt.length > 1
+        ? rtt.slice(1).reduce((sum, x, i) => sum + Math.abs(x - rtt[i]), 0) / (rtt.length - 1)
+        : 0;
+      loss = lost / PINGS * 100;
       document.getElementById('t-ping').textContent = pingMs.toFixed(1) + ' ms';
       document.getElementById('t-jitter').textContent = jitterMs.toFixed(1) + ' ms';
       document.getElementById('t-loss').textContent = loss.toFixed(0) + ' %';
 
       setTestState('DOWNLOAD_TEST');
+      const downRates = [];
       let downBytes = 0;
-      for (let i = 0; i < 4 && !signal.aborted; i++) {
+      for (let i = 0; i <= CHUNKS && !signal.aborted; i++) {
         const t0 = performance.now();
-        const r = await fetch(`/api/net/download?bytes=${1024 * 1024}&i=${i}`, { cache: 'no-store', signal });
+        const r = await fetch(`/api/net/download?bytes=${DL_SIZE}&i=${i}&t=${Date.now()}`, { cache: 'no-store', signal });
         if (!r.ok) throw new Error('download_failed');
         const buf = await r.arrayBuffer();
+        const expected = Number(r.headers.get('x-payload-bytes'));
+        if (expected && buf.byteLength !== expected) throw new Error('download_payload_mismatch');
         const dt = (performance.now() - t0) / 1000;
         downBytes += buf.byteLength; bytesUsed += buf.byteLength;
-        down = buf.byteLength * 8 / dt / 1e6;
+        if (i === 0) continue;
+        downRates.push(buf.byteLength * 8 / dt / 1e6);
+        down = median(downRates);
         setGauge(down, true);
         document.getElementById('t-down').textContent = down.toFixed(1) + ' Mbps';
         pushChart(down, up);
       }
       if (signal.aborted) throw new Error('aborted');
+      down = median(downRates);
 
       setTestState('UPLOAD_TEST');
       const chunk = new Uint8Array(256 * 1024);
       for (let o = 0; o < chunk.length; o += 64 * 1024) {
         crypto.getRandomValues(chunk.subarray(o, Math.min(o + 64 * 1024, chunk.length)));
       }
+      const upRates = [];
       let upBytes = 0;
-      for (let i = 0; i < 4 && !signal.aborted; i++) {
+      for (let i = 0; i <= CHUNKS && !signal.aborted; i++) {
         const t0 = performance.now();
-        const r = await fetch('/api/net/upload', { method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: chunk, signal });
+        const r = await fetch(`/api/net/upload?i=${i}&t=${Date.now()}`, {
+          method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: chunk, signal });
         if (!r.ok) throw new Error('upload_failed');
         const dt = (performance.now() - t0) / 1000;
         upBytes += chunk.byteLength; bytesUsed += chunk.byteLength;
-        up = chunk.byteLength * 8 / dt / 1e6;
+        if (i === 0) continue;
+        upRates.push(chunk.byteLength * 8 / dt / 1e6);
+        up = median(upRates);
         setGauge(up, true);
         document.getElementById('t-up').textContent = up.toFixed(1) + ' Mbps';
         pushChart(down, up);
       }
       if (signal.aborted) throw new Error('aborted');
+      up = median(upRates);
       const duration = (performance.now() - started) / 1000;
       document.getElementById('t-meta').textContent = duration.toFixed(1) + ' s / TikTunnel';
       document.getElementById('test-bytes').textContent = `Đã dùng ${gb(bytesUsed)} cho bài test này (tải ${gb(downBytes)}, gửi ${gb(upBytes)}).`;
       try {
         await api('/api/friend/speedtest', { method: 'POST', body: JSON.stringify({ mode, verified: false,
-          ping_ms: pingMs, jitter_ms: jitterMs, packet_loss_pct: loss, download_mbps: down, upload_mbps: up,
+          ping_ms: +pingMs.toFixed(2), jitter_ms: +jitterMs.toFixed(2), packet_loss_pct: loss,
+          download_mbps: +down.toFixed(2), upload_mbps: +up.toFixed(2),
           bytes_used: bytesUsed, duration_s: duration, server: 'TikTunnel endpoint' }) });
       } catch (e) { toast('Không lưu được lịch sử: ' + e.message); }
       setTestState('COMPLETED');
@@ -455,7 +506,7 @@ async function friendView() {
 
   async function devices() {
     const d = await api(`/api/friend/devices?device=${dev}`);
-    const rows = d.devices.map(x => `<tr><td><span class="mono">${esc(x.id)}</span><br><span class="sub">${esc(x.name || 'Chưa đặt tên')}</span></td>
+    const rows = d.devices.map(x => `<tr><td><span class="mono">${esc(x.id)}</span><br><span class="sub">${esc(x.name || x.platform || 'Chưa đặt tên')} · ${esc(x.kind || 'unknown')}</span></td>
       <td>${statusPill(x.status)}</td><td>${esc(x.last_seen.slice(5, 16))}</td>
       <td>${gb(x.upload_bytes)} / ${gb(x.download_bytes)}</td>
       <td><button class="small ghost" data-dev="${esc(x.id)}">Đổi tên</button></td></tr>`).join('');
@@ -739,6 +790,7 @@ async function boot() {
     const r = await timedFetch('/api/auth/me', { credentials: 'same-origin' }, 8000);
     if (!r.ok) return authScreen();
     me = await r.json();
+    if (me.csrf) sessionStorage.setItem('csrf', me.csrf);
     if (me.role === 'admin') return adminView();
     return friendView();
   } catch (e) {

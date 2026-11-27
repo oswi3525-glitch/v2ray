@@ -10,10 +10,14 @@ const listenPort = Number(cfg.app_port || 23952);
 const httpPort = Number(cfg.app_internal_port || 23950);
 const vlessPort = Number(cfg.vless_tcp_port || 23955);
 const HTTP_METHOD = /^(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\s/;
+const MAX_CONNECTIONS = Number(cfg.mux_max_connections || 2000);
+const CLASSIFY_TIMEOUT = Number(cfg.mux_classify_timeout_ms || 5000);
+const FLUSH_MS = 2000;
 
 let connections = 0;
 let httpCount = 0;
 let vlessCount = 0;
+let unknownCount = 0;
 const userByUuid = new Map();
 
 function reloadUsers() {
@@ -28,13 +32,42 @@ function reloadUsers() {
 reloadUsers();
 setInterval(reloadUsers, 30000).unref();
 
-function pipe(first, client, targetPort, kind, userId) {
+function vlessHeaderLength(head) {
+  const addons = head[17];
+  const at = 18 + addons;
+  if (at >= head.length) return 0;
+  const type = head[at];
+  let addrLen = 0;
+  if (type === 1) addrLen = 4;
+  else if (type === 3) {
+    if (at + 1 >= head.length) return 0;
+    addrLen = 1 + head[at + 1];
+  } else if (type === 4) addrLen = 16;
+  else return 0;
+  return at + addrLen + 4;
+}
+
+function classify(head) {
+  if (HTTP_METHOD.test(head.toString('latin1', 0, Math.min(head.length, 16)))) {
+    return { kind: 'http', first: head };
+  }
+  if (head.length < 18) return null;
+  const userId = userByUuid.get(head.subarray(1, 17).toString('hex')) || null;
+  if (!userId) return { kind: 'unknown', first: head };
+  const hlen = vlessHeaderLength(head);
+  return { kind: 'vless', first: head, userId, headerBytes: hlen > 0 && hlen <= head.length ? hlen : 0 };
+}
+
+function pipe(client, decision) {
+  const { first, kind, userId, headerBytes = 0 } = decision;
+  const targetPort = kind === 'http' ? httpPort : vlessPort;
   let stats = null;
-  if (userId && first && first.length > 17) {
-    stats = { up: first.length, down: 0, flushedUp: first.length, flushedDown: 0 };
+  if (userId && first && first.length > headerBytes) {
+    const initialUp = first.length - headerBytes;
+    stats = { up: initialUp, down: 0, flushedUp: 0, flushedDown: 0, flushed: false };
   }
   const flush = () => {
-    if (!stats) return;
+    if (!stats || stats.flushed) return;
     const du = stats.up - stats.flushedUp;
     const dd = stats.down - stats.flushedDown;
     if (du > 0 || dd > 0) {
@@ -43,45 +76,74 @@ function pipe(first, client, targetPort, kind, userId) {
       stats.flushedDown = stats.down;
     }
   };
-  const flushTimer = stats ? setInterval(flush, 2000) : null;
+  const flushTimer = stats ? setInterval(flush, FLUSH_MS) : null;
   if (flushTimer) flushTimer.unref();
+  const finish = () => {
+    if (!stats || stats.flushed) return;
+    if (flushTimer) clearInterval(flushTimer);
+    flush();
+    stats.flushed = true;
+  };
   if (stats) {
     client.on('data', (d) => { stats.up += d.length; });
-    client.on('close', () => { if (flushTimer) clearInterval(flushTimer); flush(); });
+    client.once('close', finish);
+    client.once('error', finish);
   }
   const target = net.connect(targetPort, '127.0.0.1', () => {
     if (first && first.length) target.write(first);
     client.pipe(target);
     target.pipe(client);
   });
-  if (stats) target.on('data', (d) => { stats.down += d.length; });
+  if (stats) {
+    target.on('data', (d) => { stats.down += d.length; });
+    target.once('close', finish);
+    target.once('error', finish);
+  }
   target.setNoDelay(true);
   client.setNoDelay(true);
   const done = () => { try { target.destroy(); } catch {} };
-  client.on('error', done);
-  client.on('close', done);
-  target.on('error', () => client.destroy());
-  if (kind === 'http') httpCount++; else vlessCount++;
+  client.once('close', done);
+  client.once('error', done);
+  target.once('error', () => client.destroy());
+  if (kind === 'http') httpCount++;
+  else if (kind === 'vless') vlessCount++;
+  else unknownCount++;
 }
 
 const server = net.createServer({ pauseOnConnect: true }, (client) => {
+  if (connections >= MAX_CONNECTIONS) { client.destroy(); return; }
   connections++;
-  const timer = setTimeout(() => client.destroy(), 5000);
-  const cleanup = () => { clearTimeout(timer); connections = Math.max(0, connections - 1); };
+  const timer = setTimeout(() => client.destroy(), CLASSIFY_TIMEOUT);
+  let head = Buffer.alloc(0);
+  let cleaned = false;
+  const cleanup = () => {
+    clearTimeout(timer);
+    if (cleaned) return;
+    cleaned = true;
+    connections = Math.max(0, connections - 1);
+  };
   client.once('close', cleanup);
   client.once('error', cleanup);
-  client.once('readable', () => {
-    clearTimeout(timer);
-    let first = null;
-    try { first = client.read(); } catch { client.destroy(); return; }
-    const head = first ? first.toString('latin1', 0, Math.min(first.length, 24)) : '';
-    const isHttp = HTTP_METHOD.test(head);
-    let userId = null;
-    if (!isHttp && first && first.length > 17) {
-      userId = userByUuid.get(first.subarray(1, 17).toString('hex')) || null;
+  const onReadable = () => {
+    let chunk;
+    while ((chunk = client.read()) !== null) {
+      head = head.length ? Buffer.concat([head, chunk]) : chunk;
+      const decision = classify(head);
+      if (decision) {
+        client.removeListener('readable', onReadable);
+        clearTimeout(timer);
+        pipe(client, decision);
+        return;
+      }
+      if (head.length >= 512) {
+        client.removeListener('readable', onReadable);
+        clearTimeout(timer);
+        pipe(client, { kind: 'unknown', first: head });
+        return;
+      }
     }
-    pipe(first, client, isHttp ? httpPort : vlessPort, isHttp ? 'http' : 'vless', userId);
-  });
+  };
+  client.on('readable', onReadable);
 });
 
 server.on('error', (e) => {
@@ -98,6 +160,6 @@ process.on('SIGINT', shutdown);
 
 process.on('message', (msg) => {
   if (msg && msg.type === 'stats' && process.send) {
-    process.send({ connections, http: httpCount, vless: vlessCount });
+    process.send({ connections, http: httpCount, vless: vlessCount, unknown: unknownCount });
   }
 });

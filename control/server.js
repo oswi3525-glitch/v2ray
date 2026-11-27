@@ -836,6 +836,29 @@ app.patch('/api/friend/devices/:id', async (req, reply) => {
   cdb.audit('friend', 'device_renamed', id);
   return reply.send({ ok: true });
 });
+app.post('/api/friend/devices/register', async (req, reply) => {
+  const a = guard(req, reply, 'friend'); if (!a || !csrfOk(req, a)) return reply.code(401).send({ ok: false, error: 'unauthorized' });
+  if (rateLimited(req, 'device_register', 30, 60000)) return reply.code(429).send({ ok: false, error: 'rate_limited' });
+  const id = String(req.body?.id || '');
+  if (!cdb.validDeviceId(id)) return reply.code(400).send({ ok: false, error: 'invalid_device_id' });
+  const b = req.body || {};
+  const m = {
+    name: typeof b.name === 'string' ? b.name : '',
+    platform: typeof b.platform === 'string' ? b.platform : '',
+    kind: ['mobile', 'tablet', 'desktop', 'unknown'].includes(b.kind) ? b.kind : 'unknown',
+    agent_hash: typeof b.agent_hash === 'string' ? b.agent_hash : '',
+    client_version: typeof b.client_version === 'string' ? b.client_version : ''
+  };
+  const known = cdb.getDevice(a.user.id, id);
+  const device = cdb.registerDevice(a.user.id, id, m);
+  if (!device) return reply.code(400).send({ ok: false, error: 'invalid_device_id' });
+  if (!known) {
+    cdb.audit('friend', 'device_registered', id, `${m.kind}/${m.platform}`);
+    cdb.notify({ userId: a.user.id, role: 'friend', type: 'device',
+      title: 'Thiết bị được đăng ký', body: `${m.platform || m.kind || 'Thiết bị mới'} đã đăng ký trong dashboard.` });
+  }
+  return reply.send({ ok: true, device });
+});
 app.get('/api/admin/devices', async (req, reply) => {
   if (!guard(req, reply, 'admin')) return;
   const p = page(req.query, 20, 100);
@@ -843,6 +866,19 @@ app.get('/api/admin/devices', async (req, reply) => {
 });
 
 const downloadBlock = Buffer.alloc(64 * 1024, 0x5a);
+const downloadCache = new Map();
+function downloadPayload(n) {
+  let buf = downloadCache.get(n);
+  if (!buf) {
+    buf = Buffer.allocUnsafe(n);
+    for (let i = 0; i < n; i += downloadBlock.length) {
+      downloadBlock.copy(buf, i, 0, Math.min(downloadBlock.length, n - i));
+    }
+    if (downloadCache.size >= 12) downloadCache.clear();
+    downloadCache.set(n, buf);
+  }
+  return buf;
+}
 app.get('/api/net/ping', async (req, reply) => {
   const a = guard(req, reply, 'friend'); if (!a) return;
   if (rateLimited(req, 'ping', 120, 60000)) return reply.code(429).send({ ok: false, error: 'rate_limited' });
@@ -854,12 +890,10 @@ app.get('/api/net/download', async (req, reply) => {
   let n = Number.parseInt(req.query.bytes, 10);
   if (!Number.isFinite(n) || n < 1024) n = 1024 * 1024;
   n = Math.min(n, 8 * 1024 * 1024);
-  const buf = Buffer.allocUnsafe(n);
-  for (let i = 0; i < n; i += downloadBlock.length) {
-    downloadBlock.copy(buf, i, 0, Math.min(downloadBlock.length, n - i));
-  }
+  const buf = downloadPayload(n);
   reply.header('Cache-Control', 'no-store');
   reply.header('Content-Length', String(n));
+  reply.header('X-Payload-Bytes', String(n));
   return reply.type('application/octet-stream').send(buf);
 });
 app.post('/api/net/upload', { bodyLimit: 2 * 1024 * 1024 }, async (req, reply) => {
@@ -1007,6 +1041,22 @@ app.get('/api/monitor/performance', async (req, reply) => {
 });
 
 const wss = new WebSocketServer({ noServer: true });
+const wsHeartbeat = setInterval(() => {
+  for (const set of activeWs.values()) {
+    for (const pair of set) {
+      try {
+        if (!pair.alive) {
+          pair.client.terminate();
+          pair.upstream.terminate();
+          continue;
+        }
+        pair.alive = false;
+        if (pair.client.readyState === WebSocket.OPEN) pair.client.ping();
+      } catch {}
+    }
+  }
+}, 30000);
+wsHeartbeat.unref();
 function closeUserConnections(userId) {
   const set = activeWs.get(userId);
   if (!set) return;
@@ -1067,7 +1117,9 @@ app.server.on('upgrade', (req, socket, head) => {
     let up;
     try { up = new WebSocket(`ws://${control.singbox_ws_host}:${control.singbox_ws_port}${control.ws_path}`); }
     catch { ws.close(); return; }
-    const pair = { client: ws, upstream: up, upBytes: 0, downBytes: 0, deviceId, lastTouch: 0, countedUp: 0, countedDown: 0 };
+    const pair = { client: ws, upstream: up, upBytes: 0, downBytes: 0, deviceId, lastTouch: 0,
+      countedUp: 0, countedDown: 0, alive: true };
+    ws.on('pong', () => { pair.alive = true; });
     if (!activeWs.has(user.id)) activeWs.set(user.id, new Set());
     activeWs.get(user.id).add(pair);
     const sid = cdb.db.prepare('INSERT INTO connection_sessions (user_id, ts_start, remote, device_id) VALUES (?, ?, ?, ?)')
@@ -1157,6 +1209,7 @@ function enforceQuota() {
   const t = Date.now();
   for (const [k, v] of loginFailures) if (v.until <= t) loginFailures.delete(k);
   for (const [k, v] of rateBuckets) if (v.reset <= t) rateBuckets.delete(k);
+  for (const [k, v] of deviceLastTraffic) if (t - v > 10 * 60 * 1000) deviceLastTraffic.delete(k);
 }
 
 async function main() {
@@ -1184,7 +1237,10 @@ async function main() {
     cdb.purgeNotifications(200);
     cdb.purgeSpeedTests(100);
   }, 60000).unref();
-  const shutdown = async () => { try { await app.close(); } finally { process.exit(0); } };
+  const shutdown = async () => {
+    clearInterval(wsHeartbeat);
+    try { await app.close(); } finally { process.exit(0); }
+  };
   process.on('SIGTERM', shutdown);
   process.on('SIGINT', shutdown);
 }

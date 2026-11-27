@@ -117,6 +117,11 @@ async function main() {
   const fd = await api('/api/friend/devices', { cookie: f1.cookie });
   const ad = await api('/api/admin/devices', { cookie: admin.cookie });
   check('device endpoints RBAC', fd.status === 200 && ad.status === 200);
+  const reg = await api('/api/friend/devices/register', { method: 'POST', cookie: f1.cookie, csrf: f1.data.csrf,
+    body: { id: devId, name: 'iPhone · Safari', platform: 'iOS', kind: 'mobile', agent_hash: 'a1b2c3d4e5f60718', client_version: '2.2.0' } });
+  const regRow = (await api('/api/friend/devices', { cookie: f1.cookie })).data.devices.find((d) => d.id === devId);
+  check('device identity registration persists', reg.status === 200 && regRow && regRow.platform === 'iOS' &&
+    regRow.kind === 'mobile' && regRow.name === 'iPhone · Safari');
   const sec = await api('/api/admin/security', { cookie: admin.cookie });
   check('security events recorded', sec.status === 200 && sec.data.events.some((e) => e.action === 'import_link_issued'));
   const rot = await api('/api/auth/login', { method: 'POST', cookie: f1.cookie,
@@ -178,8 +183,11 @@ async function main() {
   const notifRead = await api('/api/notifications/read', { method: 'POST', cookie: f1.cookie, csrf: rot.data.csrf, body: {} });
   check('notifications mark-as-read works', notifRead.status === 200 && notifRead.data.unread === 0);
   const diag = await api('/api/diagnostics/run', { cookie: f1.cookie });
-  check('network diagnostics returns real results', diag.status === 200 && diag.data.checks.length === 9 &&
+  check('network diagnostics returns real results', diag.status === 200 && diag.data.checks.length >= 10 &&
     diag.data.checks.some((c) => c.id === 'subscription') && diag.data.checks.some((c) => c.id === 'client_connectivity'));
+  const tiktokDiag = diag.data.checks.find((c) => c.id === 'tiktok_reachability');
+  check('tiktokv.com probe reports real HTTP status', !!tiktokDiag &&
+    /tiktokv\.com/.test(tiktokDiag.detail) && /HTTP \d{3}|no_response/.test(tiktokDiag.detail));
 
   execFileSync('bash', [path.join(ROOT, 'scripts', 'restart.sh')], { cwd: ROOT, stdio: 'ignore' });
   await sleep(1500);

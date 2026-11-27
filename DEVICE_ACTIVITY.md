@@ -9,7 +9,8 @@ Ghi nhận thiết bị **thực sự dùng VPN**, không phải thiết bị ch
 - Web tạo `device_id` ngẫu nhiên (`crypto.randomUUID()`, 32+16 hex) lưu trong `localStorage`, gửi qua `?device=<id>` cho `/api/friend/import`, `/api/friend/vpn`, `/api/friend/export`, `/api/sub/:token`.
 - Backend đưa device id vào **WS path**: `/vpn/<subscription-token>.<device-id>`. Dùng `.` làm separator vì token là base64url (không chứa `.`), và sing-box mã hoá `?` thành `%3F` nên không dùng query string.
 - Khi upgrade, Node tách token và device id, `upsertDevice()` (chỉ tạo khi có session thật), lưu `device_id` vào `connection_sessions`.
-- Device name mặc định `''` (UI hiện "Chưa đặt tên"); người dùng tự đặt qua `PATCH /api/friend/devices/:id`. Không tự đoán tên thiết bị.
+- Web tự đăng ký "danh tính thiết bị" qua `POST /api/friend/devices/register`: `{id, name, platform, kind, agent_hash, client_version}`. `platform/kind` suy từ User-Agent Client Hints (fallback UA), `name` dạng `iOS · Safari`; **User-Agent thô không bao giờ được lưu**, chỉ hash FNV 16 hex để phân biệt cấu hình. Không đọc IMEI/serial/số điện thoại.
+- Tên vẫn do người dùng chỉnh qua `PATCH /api/friend/devices/:id`; backend chỉ ghi đè metadata khi có giá trị mới hợp lệ, không xoá giá trị cũ.
 
 ## 2. Trạng thái
 
@@ -24,7 +25,7 @@ Traffic được ghi vào `devices.upload_bytes/download_bytes` theo delta thự
 
 ## 3. Dữ liệu lưu
 
-`devices`: `id`, `user_id`, `name`, `first_seen`, `last_seen`, `last_traffic_at`, `upload_bytes`, `download_bytes`.
+`devices`: `id`, `user_id`, `name`, `first_seen`, `last_seen`, `last_traffic_at`, `upload_bytes`, `download_bytes`, `platform`, `kind` (`mobile|tablet|desktop|unknown`), `agent_hash`, `client_version`.
 `connection_sessions` bổ sung `device_id`, `last_traffic_at`.
 Không lưu IP thiết bị làm định danh (IP hiện tại là IP proxy/Cloudflare, không dùng được).
 
@@ -34,6 +35,7 @@ Không lưu IP thiết bị làm định danh (IP hiện tại là IP proxy/Clou
 |---|---|
 | `GET /api/friend/devices?limit&offset` | friend, chỉ device của mình |
 | `PATCH /api/friend/devices/:id` | friend, CSRF, `WHERE id AND user_id=me` |
+| `POST /api/friend/devices/register` | friend, CSRF, tối đa 30/phút, chỉ device id hợp lệ |
 | `GET /api/admin/devices?limit&offset` | admin, mọi device |
 
 Phân trang tối đa 50 (friend)/100 (admin). Friend đổi tên device người khác → 404 (đã test).
@@ -57,5 +59,6 @@ Phân trang tối đa 50 (friend)/100 (admin). Friend đổi tên device ngườ
 
 - Device id là định danh do web tạo, **không phải số serial thiết bị**; nếu user mở web trên thiết bị khác thì có device id khác. Không tuyên bố nhận diện duy nhất phần cứng.
 - Nếu client dùng subscription URL cũ (không có `?device=`) thì vẫn có session VPN nhưng device_id = null → không có bản ghi device. UI giải thích rõ.
-- Không thể gán tên thiết bị tự động; cần người dùng đặt.
-- Trạng thái Active có độ trễ tối đa ~5s do cập nhật traffic theo chu kỳ.
+- `platform/kind` là suy luận từ UA hints, có thể sai nếu trình duyệt giả UA; không dùng làm bằng chứng bảo mật. Tên hiển thị cuối cùng vẫn do người dùng đặt.
+- Trạng thái Active có độ trễ tối đa ~5s do cập nhật traffic theo chu kỳ; WS heartbeat 30s giúp đóng session chết sớm hơn.
+- Đường VLESS TCP public không mang device id trong path; đăng ký thiết bị chỉ gắn danh tính vào bản ghi, không gán lưu lượng TCP vào từng thiết bị.

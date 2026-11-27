@@ -228,6 +228,22 @@ function migrate() {
       db.exec('COMMIT');
     } catch (e) { db.exec('ROLLBACK'); throw e; }
   }
+  if (!applied.has(6)) {
+    db.exec('BEGIN');
+    try {
+      const cols = new Set(db.prepare('PRAGMA table_info(devices)').all().map((r) => r.name));
+      for (const [col, def] of Object.entries({
+        platform: "TEXT NOT NULL DEFAULT ''",
+        kind: "TEXT NOT NULL DEFAULT 'unknown'",
+        agent_hash: "TEXT NOT NULL DEFAULT ''",
+        client_version: "TEXT NOT NULL DEFAULT ''"
+      })) {
+        if (!cols.has(col)) db.exec(`ALTER TABLE devices ADD COLUMN ${col} ${def}`);
+      }
+      db.prepare('INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)').run(6, now());
+      db.exec('COMMIT');
+    } catch (e) { db.exec('ROLLBACK'); throw e; }
+  }
   return applied;
 }
 migrate();
@@ -477,12 +493,36 @@ function auditLogs(limit = 50) {
 function validDeviceId(id) {
   return typeof id === 'string' && /^[A-Za-z0-9_-]{8,64}$/.test(id);
 }
-function upsertDevice(userId, deviceId, ts = now()) {
+const DEVICE_KINDS = new Set(['mobile', 'tablet', 'desktop', 'unknown']);
+function normalizeDeviceMeta(meta = {}) {
+  const clean = (v, max) => String(v ?? '').replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, max);
+  return {
+    name: clean(meta.name, 40),
+    platform: clean(meta.platform, 40),
+    kind: DEVICE_KINDS.has(meta.kind) ? meta.kind : 'unknown',
+    agent_hash: /^[A-Za-z0-9]{16,64}$/.test(String(meta.agent_hash || '')) ? String(meta.agent_hash) : '',
+    client_version: clean(meta.client_version, 24)
+  };
+}
+function upsertDevice(userId, deviceId, meta = {}, ts = now()) {
   if (!validDeviceId(deviceId)) return null;
-  db.prepare(`INSERT INTO devices (id,user_id,name,first_seen,last_seen) VALUES (?,?,?,?,?)
-    ON CONFLICT(id) DO UPDATE SET last_seen=excluded.last_seen, user_id=excluded.user_id`)
-    .run(deviceId, Number(userId), '', ts, ts);
+  const m = normalizeDeviceMeta(meta);
+  db.prepare(`INSERT INTO devices (id,user_id,name,first_seen,last_seen,platform,kind,agent_hash,client_version)
+    VALUES (?,?,?,?,?,?,?,?,?)
+    ON CONFLICT(id) DO UPDATE SET last_seen=excluded.last_seen, user_id=excluded.user_id,
+      name=CASE WHEN excluded.name<>'' THEN excluded.name ELSE devices.name END,
+      platform=CASE WHEN excluded.platform<>'' THEN excluded.platform ELSE devices.platform END,
+      kind=CASE WHEN excluded.kind<>'unknown' THEN excluded.kind ELSE devices.kind END,
+      agent_hash=CASE WHEN excluded.agent_hash<>'' THEN excluded.agent_hash ELSE devices.agent_hash END,
+      client_version=CASE WHEN excluded.client_version<>'' THEN excluded.client_version ELSE devices.client_version END`)
+    .run(deviceId, Number(userId), m.name, ts, ts, m.platform, m.kind, m.agent_hash, m.client_version);
   return getDevice(Number(userId), deviceId);
+}
+function registerDevice(userId, deviceId, meta = {}) {
+  if (!validDeviceId(deviceId)) return null;
+  const d = upsertDevice(userId, deviceId, meta);
+  if (d) touchDevice(deviceId, false);
+  return d;
 }
 function getDevice(userId, deviceId) {
   return db.prepare('SELECT * FROM devices WHERE id=? AND user_id=?').get(deviceId, userId);
@@ -570,7 +610,7 @@ module.exports = {
   createFriend, setFriendPassword, changeQuota, setUserState, revokeFriend,
   recordTraffic, trafficHistory, openSession, getSession, deleteSession, purgeSessions,
   addMetric, metrics, activeVpnUsers, listExperimentalClients, auditLogs,
-  validDeviceId, upsertDevice, getDevice, touchDevice, addDeviceTraffic, setDeviceName, listDevices, adminDevices,
+  validDeviceId, normalizeDeviceMeta, upsertDevice, registerDevice, getDevice, touchDevice, addDeviceTraffic, setDeviceName, listDevices, adminDevices,
   getExperimentalClient, createExperimentalClient, getOrCreateExperimentalUuid, getExperimentalConfig, setExperimentalConfig, getExperimentalEnabled, DEFAULT_EXPERIMENTAL_CONFIG,
   addSpeedTest, speedTests, adminSpeedTests, purgeSpeedTests, securityEvent, securityEvents,
   notify, notifications, unreadCount, markNotificationsRead, purgeNotifications

@@ -7,6 +7,7 @@
   "scripts": {
     "start": "bash scripts/start.sh",
     "test": "node tests/control-test.js",
+    "test:tiktok": "node tests/tiktok-connectivity.js",
     "test:performance": "node tests/control-performance.js",
     "test:stability": "node tests/control-stability.js 120"
   },

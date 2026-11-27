@@ -42,10 +42,11 @@ Startup command cho Pterodactyl/Cloudcode xem `INSTALL.md`.
 - **Admin:** Overview, User Management, Quota, Device Activity, Server Monitoring, Network Performance, Security Events, Settings.
 - **Friend:** Overview (GB + tốc độ live), Data Usage, Network Test (gauge + ping/jitter/loss/down/up), Active Devices, Shadowrocket import, Account Settings.
 - **Shadowrocket:** VLESS TCP trên port public 23952 (forwarder chặn WS); `GET /api/friend/import` xác thực session + quota + sing-box, trả `shadowrocket://add/<vless-uri>` và `sub://<base64(sub-url)>#remark`; copy/file/subscription làm fallback. Giữ bước xác nhận trong app.
-- **Network Diagnostics:** 9 hạng mục thật (DNS/TCP/TLS/WS/VLESS/Auth/Subscription/Server/Client) với trạng thái, thời gian, nguyên nhân và cách sửa; `UNKNOWN` khi không thể kiểm chứng.
+- **Network Diagnostics:** 10 hạng mục thật (DNS/TCP/TLS/TikTok CDN/WS/VLESS/Auth/Subscription/Server/Client) với trạng thái, thời gian, nguyên nhân và cách sửa; `UNKNOWN` khi không thể kiểm chứng.
 - **Port mux:** `control/port-mux.js` chia HTTP (dashboard/API) và VLESS TCP trên cùng port public, đồng thời ghi lưu lượng thật theo UUID vào DB.
-- **Devices:** định danh bằng `<subscription-token>.<device-id>` trong WS path; Active/Idle/Offline/Unknown tính từ traffic thật.
-- **Speed test:** endpoint truyền dữ liệu thật, có giới hạn (≤8 MB/lần tải, ≤2 MB/lần gửi), lịch sử tối đa 100 bản ghi/user.
+- **Devices:** định danh bằng `<subscription-token>.<device-id>` trong WS path; web đăng ký `platform/kind/agent_hash` (không lưu UA thô), Active/Idle/Offline/Unknown tính từ traffic thật.
+- **Speed test:** 10 ping bỏ mẫu lạnh, jitter theo mẫu liên tiếp, 5 chunk đo sau chunk khởi động lấy median, đối chiếu `X-Payload-Bytes`; ≤8 MB/lần tải, ≤2 MB/lần gửi, lịch sử tối đa 100 bản ghi/user.
+- **tiktokv.com:** probe thật DNS/TCP/TLS/HTTP trong Diagnostics và trang kiểm tra gói cước (`npm run test:tiktok`).
 
 ## API
 
@@ -54,7 +55,8 @@ Xem `API.md`. Tóm tắt: `/api/auth/*`, `/api/admin/*`, `/api/friend/*`, `/api/
 ## Test
 
 ```bash
-npm test                              # E2E 36 checks
+npm test                              # E2E 38 checks
+npm run test:tiktok                   # probe thật DNS/TCP/TLS/HTTP tới tiktokv.com
 node tests/device-activity-test.js    # Active → Idle → Offline (~70s)
 node tests/network-benchmark.js       # benchmark thật, ghi reports/runtime/
 npm audit --audit-level=low           # 0 vulnerabilities

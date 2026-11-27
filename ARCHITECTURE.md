@@ -17,7 +17,7 @@ Port public duy nhất là 23952; mux chuyển HTTP tới Fastify và byte VLESS
 - `/`, `/admin`, `/friend` → SPA tĩnh (`web/index.html`, `app.js`, `style.css`), cache `no-store`.
 - `/api/*` → REST: session cookie `HttpOnly`/`SameSite=Strict`, CSRF cho mọi write, RBAC admin/friend, rate limit.
 - `/api/net/*` → endpoint đo tốc độ thật (xem `NETWORK_TEST.md`).
-- VLESS TCP → mux đọc UUID ở byte 1–17, chuyển tới `127.0.0.1:23955`, đếm byte theo UUID và ghi DB mỗi 2s/lúc đóng.
+- VLESS TCP → mux gom header đến đủ 18+ byte, đọc UUID ở byte 1–17, tính độ dài header VLESS (IPv4/domain/IPv6 + addons) để **trừ phần khung VLESS** khỏi byte tính quota, chuyển tới `127.0.0.1:23955`, ghi DB mỗi 2s/lúc đóng (flush một lần). Giới hạn `mux_max_connections` mặc định 2000.
 - `/vpn/<token>[.<device-id>]` (chỉ local/test) → WS upgrade tới `ws://127.0.0.1:23954/vpn`. Public forwarder chặn `Upgrade: websocket` nên không dùng cho client.
 
 ## Shadowrocket flow
@@ -43,7 +43,7 @@ Bảng chính: `admins`, `users`, `vpn_clients`, `subscriptions`, `traffic_usage
 
 ## Quota & device enforcement
 
-1. WS proxy đếm byte; mỗi 5s ghi `last_traffic_at` và delta traffic vào `devices`; khi đóng session ghi một row `traffic_usage` + cập nhật total user.
+1. WS proxy đếm byte frame; mỗi 5s ghi `last_traffic_at` và delta traffic vào `devices`; khi đóng session ghi một row `traffic_usage` + cập nhật total user. Heartbeat ping/pong 30s đóng connection chết. Đăng ký danh tính thiết bị qua `POST /api/friend/devices/register` (chỉ lưu hash UA, không lưu UA thô).
 2. Quota worker mỗi 10s so sánh `used = used_upload + used_download` với `quota_bytes`.
 3. Vượt quota → `exhausted=1`, `enabled=0`, đóng WS, render lại sing-box (bỏ UUID), audit + quota history.
 4. Device Active khi có traffic trong 60s gần nhất; Idle khi còn session nhưng hết traffic; Offline khi không session và không traffic gần; Unknown khi thiếu dữ liệu.

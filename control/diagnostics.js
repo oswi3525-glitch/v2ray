@@ -81,6 +81,50 @@ function tlsProbe(host, port, servername) {
   });
 }
 
+function httpTlsProbe(host, port = 443, requestPath = '/', timeout = 5000) {
+  return new Promise((resolve, reject) => {
+    const t0 = Date.now();
+    const socket = net.connect(port, host);
+    let tlsSocket = null;
+    let cert = {};
+    let settled = false;
+    const finish = (err, value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      try { tlsSocket?.destroy(); } catch {}
+      try { socket.destroy(); } catch {}
+      err ? reject(err) : resolve(value);
+    };
+    const timer = setTimeout(() => finish(new Error('http_timeout')), timeout);
+    socket.setTimeout(timeout);
+    socket.once('timeout', () => finish(new Error('tcp_timeout')));
+    socket.once('error', finish);
+    try {
+      tlsSocket = tls.connect({ socket, servername: host, rejectUnauthorized: true }, () => {
+        cert = tlsSocket.getPeerCertificate() || {};
+        tlsSocket.write(`GET ${requestPath} HTTP/1.1\r\nHost: ${host}\r\nUser-Agent: tiktunnel-diagnostic/1.0\r\nAccept: */*\r\nConnection: close\r\n\r\n`);
+      });
+    } catch (e) { finish(e); return; }
+    tlsSocket.setTimeout(timeout);
+    tlsSocket.once('timeout', () => finish(new Error('tls_timeout')));
+    tlsSocket.once('error', finish);
+    let buf = '';
+    tlsSocket.on('data', (d) => {
+      buf += d.toString('latin1');
+      if (buf.includes('\r\n\r\n') || buf.length > 8192) {
+        const match = buf.match(/^HTTP\/\d(?:\.\d)?\s+(\d{3})/);
+        finish(null, { ms: Date.now() - t0, status: match ? Number(match[1]) : 0,
+          authorized: tlsSocket.authorized, protocol: tlsSocket.getProtocol(),
+          cn: cert.subject?.CN || '', valid_to: cert.valid_to || '' });
+      }
+    });
+    tlsSocket.once('end', () => finish(null, { ms: Date.now() - t0, status: 0,
+      authorized: tlsSocket.authorized, protocol: tlsSocket.getProtocol(),
+      cn: cert.subject?.CN || '', valid_to: cert.valid_to || '' }));
+  });
+}
+
 async function runDiagnostics({ control, user, cdb, internalHealthUrl }) {
   const out = [];
   const host = control.publicTcpHost;
@@ -116,6 +160,21 @@ async function runDiagnostics({ control, user, cdb, internalHealthUrl }) {
       'Cấu hình reverse proxy chuyển /api và /vpn tới app, hoặc dùng TLS trên endpoint TCP có chứng chỉ riêng', Date.now() - t));
   } catch (e) {
     out.push(item('tls', 'TLS Handshake', 'FAIL', `${httpsHost}:443 ${e.message}`, 'Không bắt tay TLS được với HTTPS host', 'Kiểm tra Cloudflare/HTTPS forwarding', Date.now() - t));
+  }
+
+  t = Date.now();
+  const tiktokHost = control.tiktok_probe_host || 'tiktokv.com';
+  try {
+    const ips = await timed(() => new Promise((res, rej) => dns.lookup(tiktokHost, { all: true }, (e, a) => e ? rej(e) : res(a))), 4000);
+    const r = await httpTlsProbe(tiktokHost, 443, '/', 5000);
+    const reachable = r.status > 0;
+    out.push(item('tiktok_reachability', 'TikTok CDN (tiktokv.com)', reachable ? 'PASS' : 'WARNING',
+      `${tiktokHost} -> ${ips.map((x) => x.address).slice(0, 3).join(', ')}; TLS=${r.protocol} cert=${r.authorized ? 'valid' : 'invalid'} CN=${r.cn} HTTP ${r.status || 'no_response'} in ${r.ms} ms`,
+      reachable ? '' : 'Có DNS/TLS nhưng không nhận được HTTP response từ CDN',
+      reachable ? '' : 'Kiểm tra route/mạng tới TikTok CDN (không phải lỗi của TikTunnel)', Date.now() - t));
+  } catch (e) {
+    out.push(item('tiktok_reachability', 'TikTok CDN (tiktokv.com)', 'FAIL', `${tiktokHost}:443 ${e.message}`,
+      'Không phân giải/TLS/HTTP được tới tiktokv.com từ máy chủ này', 'Kiểm tra DNS và outbound 443 của host', Date.now() - t));
   }
 
   t = Date.now();

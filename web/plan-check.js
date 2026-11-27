@@ -83,8 +83,8 @@ function conclusion(items) {
 function renderHistory() {
   const runs = loadHistory();
   if (!runs.length) { historyEl.innerHTML = '<p class="sub">Chưa có lần đo nào.</p>'; return; }
-  historyEl.innerHTML = `<div class="scroll"><table><thead><tr><th>Thời gian</th><th>TikTok</th><th>Internet</th><th>Endpoint</th></tr></thead><tbody>
-    ${runs.slice(-10).reverse().map((r) => `<tr><td class="mono">${esc(r.at)}</td><td>${pill(r.tiktok)}</td><td>${pill(r.inet)}</td><td>${pill(r.ep)}</td></tr>`).join('')}
+  historyEl.innerHTML = `<div class="scroll"><table><thead><tr><th>Thời gian</th><th>TikTok</th><th>CDN</th><th>Internet</th><th>Endpoint</th></tr></thead><tbody>
+    ${runs.slice(-10).reverse().map((r) => `<tr><td class="mono">${esc(r.at)}</td><td>${pill(r.tiktok)}</td><td>${pill(r.cdn || 'UNKNOWN')}</td><td>${pill(r.inet)}</td><td>${pill(r.ep)}</td></tr>`).join('')}
     </tbody></table></div>`;
 }
 async function run() {
@@ -95,6 +95,7 @@ async function run() {
   resultEl.innerHTML = '<div class="skeleton-wrap"><div class="skeleton"></div><div class="skeleton"></div><div class="skeleton"></div></div>';
   const items = [];
   items.push(await repeated('TikTok', 'https://www.tiktok.com/'));
+  items.push(await repeated('TikTok CDN (tiktokv.com)', 'https://tiktokv.com/'));
   items.push(await repeated('Internet thường', 'https://example.com/'));
   items.push(await endpointProbe());
   items.push({ label: 'DNS / TCP thô', status: 'UNKNOWN', ms: null, samples: '',
@@ -103,7 +104,8 @@ async function run() {
   resultEl.innerHTML = items.map(row).join('') + conclusion(items) + `<p class="sub">Đo lúc: ${esc(at)}</p>`;
   const get = (l) => items.find((x) => x.label === l).status;
   const runs = loadHistory();
-  runs.push({ at, tiktok: get('TikTok'), inet: get('Internet thường'), ep: get('Endpoint TikTunnel'), items });
+  runs.push({ at, tiktok: get('TikTok'), cdn: get('TikTok CDN (tiktokv.com)'),
+    inet: get('Internet thường'), ep: get('Endpoint TikTunnel'), items });
   saveHistory(runs);
   renderHistory();
 }

@@ -33,12 +33,23 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 function curlVia(port) {
   const r = spawnSync('curl', ['-sS', '-m', '15', '-o', '/dev/null', '-w', '%{http_code} %{size_download}',
     '--socks5', `127.0.0.1:${port}`, 'http://127.0.0.1:18082/blob.bin'], { encoding: 'utf8' });
-  return r.status === 0 && r.stdout.trim().startsWith('200');
+  const [code, bytes] = r.stdout.trim().split(/\s+/).map(Number);
+  return r.status === 0 && code === 200 && bytes > 0;
 }
 async function statusFor(cookie, id) {
   const d = await api('/api/friend/devices?limit=50', { cookie });
   const found = d.data.devices.find((x) => x.id === id);
   return found ? { status: found.status, up: found.upload_bytes, down: found.download_bytes } : null;
+}
+async function waitForStatus(cookie, id, ok, timeoutMs = 8000) {
+  const t0 = Date.now();
+  let last = null;
+  while (Date.now() - t0 < timeoutMs) {
+    last = await statusFor(cookie, id);
+    if (ok(last)) return last;
+    await sleep(500);
+  }
+  return last;
 }
 
 async function main() {
@@ -75,7 +86,7 @@ async function main() {
   await sleep(2000);
   rec('real traffic through VPN with device ID', curlVia(18999));
 
-  const active = await statusFor(cookie, DEVICE);
+  const active = await waitForStatus(cookie, DEVICE, (x) => !!x && x.status === 'active' && x.down > 0);
   rec('device Active after traffic', !!active && active.status === 'active' && active.down > 0,
     active ? `${active.status} down=${active.down}` : 'missing');
 

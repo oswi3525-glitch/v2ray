@@ -27,7 +27,7 @@ Auth: session cookie `tiktunnel_session` (HttpOnly). All mutating admin requests
 | GET | `/api/admin/speedtests` | last 50 speed-test results across users |
 | GET | `/api/admin/security` | security events + active policy summary |
 | GET | `/api/monitor/latency` | 6 concurrent real TCP probes (1.5s): current/average/peak/jitter/packet loss |
-| GET | `/api/diagnostics/run` | 9 real checks (DNS/TCP/TLS/WS/VLESS/auth/subscription/server/client) with status, duration, cause and fix; 6/min |
+| GET | `/api/diagnostics/run` | 10 real checks (DNS/TCP/TLS/TikTok CDN/WS/VLESS/auth/subscription/server/client) with status, duration, cause and fix; 6/min |
 | PATCH | `/api/admin/users/:id` | `{display_name,enabled,expires_at,uuid}` |
 | DELETE | `/api/admin/users/:id` | revoke friend and VPN access |
 | POST | `/api/admin/users/:id/quota` | `{action:set|add|reduce|reset,gb}` — `set` replaces, `add`/`reduce` adjust by `gb`, `reset` sets quota to 0 (unlimited); `exhausted` is recomputed |
@@ -49,6 +49,7 @@ Auth: session cookie `tiktunnel_session` (HttpOnly). All mutating admin requests
 | GET | `/api/friend/import?device` | validate session/quota/server, return VLESS URI, subscription URL and Shadowrocket deep links (`shadowrocket://add/...`, `sub://BASE64#remark`) |
 | GET | `/api/friend/devices?limit&offset` | own devices from real VPN sessions, with status |
 | PATCH | `/api/friend/devices/:id` | rename own device `{name}` (CSRF) |
+| POST | `/api/friend/devices/register` | register device identity `{id,name,platform,kind,mobile\|tablet\|desktop\|unknown,agent_hash,client_version}` (CSRF); raw User-Agent is never stored, only a short hash |
 | POST | `/api/friend/password` | change own login password `{password}` (CSRF) |
 | POST | `/api/friend/speedtest` | save measured result `{mode,verified,ping_ms,jitter_ms,packet_loss_pct,download_mbps,upload_mbps,bytes_used,duration_s,server}` (CSRF) |
 | GET | `/api/friend/speedtests?limit&offset` | own test history |

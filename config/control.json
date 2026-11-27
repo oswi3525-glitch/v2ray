@@ -14,5 +14,6 @@
   "public_tcp_host": "vn-hn.cldcode.host",
   "cookie_secure": false,
   "quota_check_ms": 10000,
-  "probe_endpoints": ["1.1.1.1:443", "8.8.8.8:443", "app-medium-1-ac2e.cldcode.host:443"]
+  "probe_endpoints": ["1.1.1.1:443", "8.8.8.8:443", "app-medium-1-ac2e.cldcode.host:443"],
+  "tiktok_probe_host": "tiktokv.com"
 }
