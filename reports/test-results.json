@@ -1,0 +1,177 @@
+[
+  {
+    "name": "sing-box config valid",
+    "status": "PASS",
+    "detail": ""
+  },
+  {
+    "name": "API /health",
+    "status": "PASS",
+    "detail": ""
+  },
+  {
+    "name": "API /api/status (admin)",
+    "status": "PASS",
+    "detail": ""
+  },
+  {
+    "name": "SQLite readable",
+    "status": "PASS",
+    "detail": ""
+  },
+  {
+    "name": "sing-box port listening",
+    "status": "PASS",
+    "detail": ""
+  },
+  {
+    "name": "TLS certificate valid",
+    "status": "SKIP",
+    "detail": "no user-owned domain/cert; platform terminates TLS"
+  },
+  {
+    "name": "REALITY handshake",
+    "status": "SKIP",
+    "detail": "no transparent inbound TCP; Shadowrocket compatibility unverified"
+  },
+  {
+    "name": "create account 1",
+    "status": "PASS",
+    "detail": ""
+  },
+  {
+    "name": "create account 2",
+    "status": "PASS",
+    "detail": ""
+  },
+  {
+    "name": "create account 3",
+    "status": "PASS",
+    "detail": ""
+  },
+  {
+    "name": "4th account rejected (max 3)",
+    "status": "PASS",
+    "detail": ""
+  },
+  {
+    "name": "admin API rejects missing token",
+    "status": "PASS",
+    "detail": ""
+  },
+  {
+    "name": "input validation (bad name)",
+    "status": "PASS",
+    "detail": ""
+  },
+  {
+    "name": "3 active accounts in DB",
+    "status": "PASS",
+    "detail": ""
+  },
+  {
+    "name": "UUIDs are unique",
+    "status": "PASS",
+    "detail": ""
+  },
+  {
+    "name": "subscription 1 exported & UUID matches",
+    "status": "PASS",
+    "detail": ""
+  },
+  {
+    "name": "subscription 2 exported & UUID matches",
+    "status": "PASS",
+    "detail": ""
+  },
+  {
+    "name": "subscription 3 exported & UUID matches",
+    "status": "PASS",
+    "detail": ""
+  },
+  {
+    "name": "Shadowrocket import on iOS",
+    "status": "SKIP",
+    "detail": "no iOS device; URI format is standard VLESS"
+  },
+  {
+    "name": "VLESS client 1 socks port up",
+    "status": "PASS",
+    "detail": ""
+  },
+  {
+    "name": "VLESS client 2 socks port up",
+    "status": "PASS",
+    "detail": ""
+  },
+  {
+    "name": "VLESS client 3 socks port up",
+    "status": "PASS",
+    "detail": ""
+  },
+  {
+    "name": "client 1 reaches HTTP through VLESS",
+    "status": "PASS",
+    "detail": "200 8388608 in 43ms"
+  },
+  {
+    "name": "client 2 reaches HTTP through VLESS",
+    "status": "PASS",
+    "detail": "200 8388608 in 27ms"
+  },
+  {
+    "name": "client 3 reaches HTTP through VLESS",
+    "status": "PASS",
+    "detail": "200 8388608 in 32ms"
+  },
+  {
+    "name": "HTTPS via VLESS (external)",
+    "status": "PASS",
+    "detail": "200 2262"
+  },
+  {
+    "name": "3 simultaneous VLESS transfers",
+    "status": "PASS",
+    "detail": ""
+  },
+  {
+    "name": "revoke account 3",
+    "status": "PASS",
+    "detail": ""
+  },
+  {
+    "name": "revoked UUID cannot proxy",
+    "status": "PASS",
+    "detail": "000 0"
+  },
+  {
+    "name": "fresh clients for remaining users start",
+    "status": "PASS",
+    "detail": ""
+  },
+  {
+    "name": "remaining accounts still work",
+    "status": "PASS",
+    "detail": ""
+  },
+  {
+    "name": "inbound connection from Internet",
+    "status": "SKIP",
+    "detail": "Codespaces HTTP tunnel requires GitHub auth; raw TCP not exposed"
+  },
+  {
+    "name": "Wi-Fi to 4G/5G handover",
+    "status": "SKIP",
+    "detail": "no external client device"
+  },
+  {
+    "name": "packet loss (external path)",
+    "status": "SKIP",
+    "detail": "no external client; local TCP loss not representative"
+  },
+  {
+    "name": "DNS leak on client device",
+    "status": "SKIP",
+    "detail": "no client device; server-side DNS uses local resolver only"
+  }
+]

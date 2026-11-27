@@ -1,0 +1,15 @@
+{
+  "duration_s": 120,
+  "samples": 12,
+  "rss_server_start_kb": 52792,
+  "rss_server_end_kb": 57544,
+  "rss_server_growth_kb": 4752,
+  "rss_api_start_kb": 80392,
+  "rss_api_end_kb": 76452,
+  "cpu_avg_pct": 16.1,
+  "cpu_max_pct": 22.75,
+  "traffic_success": 36,
+  "traffic_failures": 0,
+  "restarts": 1,
+  "completed": true
+}

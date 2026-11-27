@@ -1,0 +1,18 @@
+{
+  "duration_s": 1201,
+  "samples": 119,
+  "rss_server_start_kb": 52812,
+  "rss_server_end_kb": 57480,
+  "rss_server_growth_kb": 4668,
+  "rss_api_start_kb": 76816,
+  "rss_api_end_kb": 76552,
+  "cpu_avg_pct": 22.1,
+  "cpu_max_pct": 54.81,
+  "traffic_success": 357,
+  "traffic_failures": 0,
+  "restarts": 1,
+  "restart_recovery": "PASS",
+  "completed_30_min": false,
+  "stopped_early_by_user_request": true,
+  "note": "Raw CSV for this run was overwritten by the later 120s smoke; summary preserved from live measurement output."
+}

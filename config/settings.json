@@ -1,0 +1,13 @@
+{
+  "listen_host": "0.0.0.0",
+  "listen_port": 8443,
+  "api_host": "127.0.0.1",
+  "api_port": 3000,
+  "max_users": 3,
+  "public_host": "127.0.0.1",
+  "security": "none",
+  "sni": "",
+  "transport": "tcp",
+  "flow": "",
+  "mode": "lab-local-only"
+}

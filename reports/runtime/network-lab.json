@@ -1,0 +1,81 @@
+{
+  "measured_at": "2026-11-27T10:34:51.434Z",
+  "location": "Azure Codespaces, Singapore (NOT Viettel)",
+  "direct": {
+    "1.1.1.1:443": {
+      "samples_ms": [
+        4,
+        2,
+        2,
+        3,
+        2,
+        1,
+        2,
+        2,
+        2,
+        2
+      ],
+      "avg_ms": 2.2,
+      "loss_pct": 0
+    },
+    "8.8.8.8:443": {
+      "samples_ms": [
+        1,
+        1,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        3
+      ],
+      "avg_ms": 1.9,
+      "loss_pct": 0
+    },
+    "github.com:443": {
+      "samples_ms": [
+        10,
+        3,
+        3,
+        3,
+        3,
+        2,
+        3,
+        3,
+        2,
+        2
+      ],
+      "avg_ms": 3.4,
+      "loss_pct": 0
+    },
+    "dns_github": {
+      "ms": 2,
+      "addr": "20.6.7.17"
+    },
+    "download": {
+      "ok": true,
+      "http": 200,
+      "bytes": 5000000,
+      "bytes_per_s": 53000349,
+      "total_s": 0.094339,
+      "ttfb_s": 0.061297
+    }
+  },
+  "vpn": {
+    "download": {
+      "ok": true,
+      "http": 200,
+      "bytes": 5000000,
+      "bytes_per_s": 59503974,
+      "total_s": 0.084028,
+      "ttfb_s": 0.063062
+    }
+  },
+  "limitations": [
+    "Environment is not a Viettel network; no Viettel SIM, Wi-Fi or iOS device is available.",
+    "Wi-Fi vs 4G/5G comparison, VLESS import on Shadowrocket, and client-side DNS leak tests are BLOCKED.",
+    "VPN-side download uses the same host as both client and server, so it measures proxy overhead, not a remote client path."
+  ]
+}
