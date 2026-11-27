@@ -25,12 +25,15 @@ const control = (() => {
 })();
 
 const app = Fastify({ logger: false, bodyLimit: 16 * 1024, trustProxy: false });
+app.addContentTypeParser('application/octet-stream', { parseAs: 'buffer' }, (_req, body, done) => done(null, body));
 const startedAt = Date.now();
 const apiTimes = [];
 const rateBuckets = new Map();
 const activeWs = new Map();
 const liveTraffic = new Map();
 const speedPrev = new Map();
+const deviceLastTraffic = new Map();
+const loginFailures = new Map();
 
 function cookieMap(req) {
   const out = {};
@@ -75,9 +78,10 @@ function setSessionCookie(reply, s) {
   reply.header('Set-Cookie', [parts.join('; '), csrfParts.join('; ')]);
 }
 function clearSessionCookie(reply) {
+  const secure = control.cookieSecure ? '; Secure' : '';
   reply.header('Set-Cookie', [
-    'tiktunnel_session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0',
-    'tiktunnel_csrf=; Path=/; SameSite=Strict; Max-Age=0'
+    `tiktunnel_session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0${secure}`,
+    `tiktunnel_csrf=; Path=/; SameSite=Strict; Max-Age=0${secure}`
   ]);
 }
 function rateLimited(req, key, limit, windowMs) {
@@ -111,8 +115,21 @@ function publicUser(u) {
   };
 }
 
-function sendConfigFile(reply, u) {
-  const uri = vlessUri(u);
+function publicSelf(u) {
+  const p = publicUser(u);
+  delete p.subscription_token;
+  delete p.subscription_path;
+  delete p.uuid;
+  return p;
+}
+function accountReady(u) {
+  if (!u || u.revoked_at || u.enabled !== 1 || u.exhausted === 1) return false;
+  if ((u.quota_bytes || 0) > 0 && (u.used_upload || 0) + (u.used_download || 0) >= u.quota_bytes) return false;
+  if (u.expires_at && Date.parse(u.expires_at) <= Date.now()) return false;
+  return true;
+}
+function sendConfigFile(reply, u, deviceId = null) {
+  const uri = vlessUri(u, deviceId);
   if (!uri) return reply.code(404).send({ ok: false, error: 'not_found' });
   const name = String(u.username || 'tiktunnel').replace(/[^A-Za-z0-9_.-]/g, '_').slice(0, 40);
   reply.header('Content-Disposition', `attachment; filename="tiktunnel-${name}.txt"`);
@@ -121,7 +138,7 @@ function sendConfigFile(reply, u) {
   return reply.send(uri + '\n');
 }
 
-function vlessUri(u) {
+function vlessUri(u, deviceId = null) {
   const v = cdb.getVpnClient(u.id);
   const s = cdb.getSubscription(u.id);
   if (!v || !s) return null;
@@ -129,10 +146,11 @@ function vlessUri(u) {
   if (control.vpn_mode === 'tcp') {
     return `vless://${v.uuid}@${control.publicTcpHost}:${control.publicTcpPort}?encryption=none&type=tcp&security=none#${name}`;
   }
+  const pathValue = s.path + (cdb.validDeviceId(deviceId) ? `.${deviceId}` : '');
   const q = [
     'encryption=none',
     'type=ws',
-    `path=${s.path}`,
+    `path=${pathValue}`,
     `host=${control.public_https_host}`,
     'security=tls',
     `sni=${control.public_https_host}`
@@ -155,7 +173,9 @@ app.addHook('onRequest', async (req, reply) => {
   reply.header('X-Content-Type-Options', 'nosniff');
   reply.header('X-Frame-Options', 'DENY');
   reply.header('Referrer-Policy', 'no-referrer');
-  reply.header('Content-Security-Policy', "default-src 'self'; script-src 'self' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'");
+  reply.header('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=()');
+  reply.header('X-Permitted-Cross-Domain-Policies', 'none');
+  reply.header('Content-Security-Policy', "default-src 'self'; script-src 'self' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'");
   if (req.url.startsWith('/api/') && rateLimited(req, 'api', 180, 60000)) {
     reply.code(429).send({ ok: false, error: 'rate_limited' });
   }
@@ -186,10 +206,20 @@ app.get('/app.js', readStatic('app.js', 'application/javascript; charset=utf-8')
 app.get('/health', async () => ({ ok: true, service: 'tiktunnel-control', uptime_s: Math.floor((Date.now() - startedAt) / 1000) }));
 
 app.post('/api/auth/login', async (req, reply) => {
-  if (rateLimited(req, 'login', 10, 300000)) return reply.code(429).send({ ok: false, error: 'too_many_attempts' });
   const username = typeof req.body?.username === 'string' ? req.body.username.trim() : '';
   const password = typeof req.body?.password === 'string' ? req.body.password : '';
-  if (!username || !password) {
+  const key = `${req.ip}|${username || '-'}`;
+  const now = Date.now();
+  const failures = loginFailures.get(key);
+  if (failures && failures.n >= 5 && failures.until > now) {
+    cdb.securityEvent('anonymous', 'login_locked', username, req.ip, `until=${new Date(failures.until).toISOString()}`);
+    return reply.code(429).send({ ok: false, error: 'too_many_attempts' });
+  }
+  if (rateLimited(req, 'login', 10, 300000)) {
+    cdb.securityEvent('anonymous', 'rate_limited', 'login', req.ip);
+    return reply.code(429).send({ ok: false, error: 'too_many_attempts' });
+  }
+  if (!username || !password || username.length > 32 || password.length > 200) {
     return reply.code(400).send({ ok: false, error: 'invalid_input' });
   }
   const admin = cdb.getAdmin();
@@ -200,19 +230,28 @@ app.post('/api/auth/login', async (req, reply) => {
     if (f && f.password_hash && f.enabled === 1 && !f.revoked_at) { user = f; role = 'friend'; }
   }
   if (!user || !bcrypt.compareSync(password, user.password_hash)) {
+    const n = (failures && failures.until <= now ? 0 : (failures?.n || 0)) + 1;
+    loginFailures.set(key, { n, until: n >= 5 ? now + 15 * 60e3 : now + 60e3 });
     cdb.audit('anonymous', 'login_failed', username);
+    cdb.securityEvent('anonymous', 'login_failed', username, req.ip, `attempt=${n}`);
     return reply.code(401).send({ ok: false, error: 'invalid_credentials' });
   }
+  loginFailures.delete(key);
+  const oldId = cookieMap(req).tiktunnel_session;
+  if (oldId) cdb.deleteSession(oldId);
   const s = cdb.openSession(user.id, role);
   setSessionCookie(reply, s);
   cdb.audit(role, 'login', username);
+  cdb.securityEvent(role, 'login', username, req.ip);
   return reply.send({ ok: true, role, csrf: s.csrf });
 });
 
 app.post('/api/auth/logout', async (req, reply) => {
   const s = sessionFor(req);
-  if (s) cdb.deleteSession(s.id);
+  if (!s || req.headers['x-csrf-token'] !== s.csrf) return reply.code(401).send({ ok: false, error: 'unauthorized' });
+  cdb.deleteSession(s.id);
   clearSessionCookie(reply);
+  cdb.securityEvent(s.role, 'logout', String(s.user_id), req.ip);
   return reply.send({ ok: true });
 });
 
@@ -359,18 +398,56 @@ app.get('/api/admin/audit', async (req, reply) => {
   if (!guard(req, reply, 'admin')) return;
   return reply.send({ ok: true, events: cdb.auditLogs(100) });
 });
+app.get('/api/admin/security', async (req, reply) => {
+  if (!guard(req, reply, 'admin')) return;
+  return reply.send({ ok: true, events: cdb.securityEvents(100),
+    policy: { password: 'bcrypt cost 12', session: 'HttpOnly/SameSite=Strict', csrf: true,
+      login_lockout: '5 failures / 15 min', rate_limit: '180 req/min/api' } });
+});
 
 app.get('/api/friend/me', async (req, reply) => {
   const a = guard(req, reply, 'friend'); if (!a) return;
-  return reply.send({ ok: true, user: publicUser(a.user) });
+  return reply.send({ ok: true, user: publicSelf(cdb.getUser(a.user.id) || a.user) });
 });
 app.get('/api/friend/usage', async (req, reply) => {
   const a = guard(req, reply, 'friend'); if (!a) return;
-  return reply.send({ ok: true, usage: publicUser(a.user), history: cdb.trafficHistory(a.user.id, 100) });
+  return reply.send({ ok: true, usage: publicSelf(cdb.getUser(a.user.id) || a.user), history: cdb.trafficHistory(a.user.id, 100) });
 });
 app.get('/api/friend/vpn', async (req, reply) => {
   const a = guard(req, reply, 'friend'); if (!a) return;
-  return reply.send({ ok: true, uri: vlessUri(a.user), mode: control.vpn_mode, active: cdb.activeVpnUsers().some((u) => u.id === a.user.id) });
+  return reply.send({ ok: true, uri: vlessUri(a.user, req.query.device), mode: control.vpn_mode, active: cdb.activeVpnUsers().some((u) => u.id === a.user.id) });
+});
+app.get('/api/friend/import', async (req, reply) => {
+  const a = guard(req, reply, 'friend'); if (!a) return;
+  const u = cdb.getUser(a.user.id) || a.user;
+  const deviceId = cdb.validDeviceId(req.query.device) ? req.query.device : null;
+  if (!accountReady(u)) {
+    cdb.securityEvent('friend', 'import_denied', String(u.id), req.ip, 'account_not_ready');
+    return reply.code(403).send({ ok: false, error: 'account_not_ready' });
+  }
+  const s = cdb.getSubscription(u.id);
+  const uri = vlessUri(u, deviceId);
+  if (!s || !uri) return reply.code(409).send({ ok: false, error: 'config_not_ready' });
+  const origin = control.public_https_host ? `https://${control.public_https_host}` : `${req.protocol}://${req.headers.host}`;
+  const subUrl = `${origin}/api/sub/${s.token}${deviceId ? `?device=${deviceId}` : ''}`;
+  const remark = String(u.display_name || u.username).replace(/[^\p{L}\p{N} ._-]/gu, '').slice(0, 40) || 'TikTunnel';
+  const serverReady = processAlive(readPid('sing-box.pid'));
+  cdb.securityEvent('friend', 'import_link_issued', String(u.id), req.ip, `mode=${control.vpn_mode}`);
+  return reply.header('Cache-Control', 'no-store').send({
+    ok: true,
+    server_ready: serverReady,
+    account_ready: true,
+    ready: serverReady && cdb.activeVpnUsers().some((x) => x.id === u.id),
+    remaining_bytes: Math.max(0, (u.quota_bytes || 0) - (u.used_upload || 0) - (u.used_download || 0)),
+    uri,
+    subscription_url: subUrl,
+    links: {
+      node: `shadowrocket://add/${uri}`,
+      subscription: `sub://${Buffer.from(subUrl, 'utf8').toString('base64')}#${encodeURIComponent(remark)}`
+    },
+    fallback: { copy_uri: true, open_url: subUrl, file_url: `/api/friend/export${deviceId ? `?device=${deviceId}` : ''}` },
+    note: 'Chỉ coi là thành công sau khi bạn xác nhận thêm server trong Shadowrocket.'
+  });
 });
 app.get('/api/friend/live', async (req, reply) => {
   const a = guard(req, reply, 'friend'); if (!a) return;
@@ -382,20 +459,131 @@ app.get('/api/friend/subscription', async (req, reply) => {
   const s = cdb.getSubscription(a.user.id);
   return reply.send({
     ok: true,
-    url: `/api/sub/${s.token}`,
-    token: s.token,
-    uri: vlessUri(a.user)
+    url: `/api/sub/${s.token}${cdb.validDeviceId(req.query.device) ? `?device=${req.query.device}` : ''}`,
+    uri: vlessUri(a.user, req.query.device)
   });
 });
 app.get('/api/friend/export', async (req, reply) => {
   const a = guard(req, reply, 'friend'); if (!a) return;
-  return sendConfigFile(reply, cdb.getUser(a.user.id) || a.user);
+  return sendConfigFile(reply, cdb.getUser(a.user.id) || a.user, req.query.device);
+});
+
+function page(q, def = 20, max = 100) {
+  return {
+    limit: Math.min(max, Math.max(1, Number.parseInt(q.limit, 10) || def)),
+    offset: Math.max(0, Number.parseInt(q.offset, 10) || 0)
+  };
+}
+function deviceStatus(d, nowTs = Date.now()) {
+  const last = deviceLastTraffic.get(d.id) || (d.last_traffic_at ? Date.parse(d.last_traffic_at) : 0);
+  if (last > 0 && nowTs - last <= 60000) return 'active';
+  if (d.open_sessions > 0) return 'idle';
+  return d.last_seen ? 'offline' : 'unknown';
+}
+function withStatus(rows) {
+  const t = Date.now();
+  return rows.map((d) => ({ ...d, status: deviceStatus(d, t) }));
+}
+
+app.post('/api/friend/password', async (req, reply) => {
+  const a = guard(req, reply, 'friend'); if (!a || !csrfOk(req, a)) return reply.code(401).send({ ok: false, error: 'unauthorized' });
+  if (!validPassword(req.body?.password)) return reply.code(400).send({ ok: false, error: 'invalid_password' });
+  cdb.setFriendPassword(a.user.id, bcrypt.hashSync(req.body.password, 12));
+  cdb.securityEvent('friend', 'password_changed', String(a.user.id), req.ip);
+  return reply.send({ ok: true });
+});
+
+app.get('/api/friend/devices', async (req, reply) => {
+  const a = guard(req, reply, 'friend'); if (!a) return;
+  const p = page(req.query, 20, 50);
+  return reply.send({ ok: true, devices: withStatus(cdb.listDevices(a.user.id, p.limit, p.offset)), ...p });
+});
+app.patch('/api/friend/devices/:id', async (req, reply) => {
+  const a = guard(req, reply, 'friend'); if (!a || !csrfOk(req, a)) return reply.code(401).send({ ok: false, error: 'unauthorized' });
+  const id = String(req.params.id);
+  if (!cdb.validDeviceId(id) || !cdb.getDevice(a.user.id, id)) return reply.code(404).send({ ok: false, error: 'not_found' });
+  cdb.setDeviceName(a.user.id, id, req.body?.name);
+  cdb.audit('friend', 'device_renamed', id);
+  return reply.send({ ok: true });
+});
+app.get('/api/admin/devices', async (req, reply) => {
+  if (!guard(req, reply, 'admin')) return;
+  const p = page(req.query, 20, 100);
+  return reply.send({ ok: true, devices: withStatus(cdb.adminDevices(p.limit, p.offset)), ...p });
+});
+
+const downloadBlock = Buffer.alloc(64 * 1024, 0x5a);
+app.get('/api/net/ping', async (req, reply) => {
+  const a = guard(req, reply, 'friend'); if (!a) return;
+  if (rateLimited(req, 'ping', 120, 60000)) return reply.code(429).send({ ok: false, error: 'rate_limited' });
+  return reply.header('Cache-Control', 'no-store').send({ ok: true, t: Date.now(), ip: req.ip });
+});
+app.get('/api/net/download', async (req, reply) => {
+  const a = guard(req, reply, 'friend'); if (!a) return;
+  if (rateLimited(req, 'download', 30, 60000)) return reply.code(429).send({ ok: false, error: 'rate_limited' });
+  let n = Number.parseInt(req.query.bytes, 10);
+  if (!Number.isFinite(n) || n < 1024) n = 1024 * 1024;
+  n = Math.min(n, 8 * 1024 * 1024);
+  const buf = Buffer.allocUnsafe(n);
+  for (let i = 0; i < n; i += downloadBlock.length) {
+    downloadBlock.copy(buf, i, 0, Math.min(downloadBlock.length, n - i));
+  }
+  reply.header('Cache-Control', 'no-store');
+  reply.header('Content-Length', String(n));
+  return reply.type('application/octet-stream').send(buf);
+});
+app.post('/api/net/upload', { bodyLimit: 2 * 1024 * 1024 }, async (req, reply) => {
+  const a = guard(req, reply, 'friend'); if (!a) return;
+  if (rateLimited(req, 'upload', 30, 60000)) return reply.code(429).send({ ok: false, error: 'rate_limited' });
+  const received = Buffer.isBuffer(req.body) ? req.body.length : 0;
+  return reply.send({ ok: true, received });
+});
+app.post('/api/friend/speedtest', async (req, reply) => {
+  const a = guard(req, reply, 'friend'); if (!a || !csrfOk(req, a)) return reply.code(401).send({ ok: false, error: 'unauthorized' });
+  if (rateLimited(req, 'speedtest', 20, 60000)) return reply.code(429).send({ ok: false, error: 'rate_limited' });
+  const b = req.body || {};
+  const num = (v, max) => { const x = Number(v); return Number.isFinite(x) && x >= 0 && x <= max ? x : null; };
+  const mode = b.mode === 'vpn' ? 'vpn' : b.mode === 'direct' ? 'direct' : null;
+  const ping = num(b.ping_ms, 10000), jitter = num(b.jitter_ms, 10000);
+  const loss = num(b.packet_loss_pct, 100), down = num(b.download_mbps, 10000), up = num(b.upload_mbps, 10000);
+  const used = num(b.bytes_used, 100 * 1024 * 1024), dur = num(b.duration_s, 600);
+  if (!mode || ping === null || jitter === null || loss === null || down === null || up === null || used === null || dur === null) {
+    return reply.code(400).send({ ok: false, error: 'invalid_input' });
+  }
+  const id = cdb.addSpeedTest({ user_id: a.user.id, mode, verified: b.verified === true, ping_ms: ping,
+    jitter_ms: jitter, packet_loss_pct: loss, download_mbps: down, upload_mbps: up,
+    bytes_used: used, duration_s: dur, server: String(b.server || '').slice(0, 120) });
+  cdb.purgeSpeedTests(100);
+  cdb.audit('friend', 'speed_test_saved', String(a.user.id), `mode=${mode}`);
+  return reply.code(201).send({ ok: true, id });
+});
+app.get('/api/friend/speedtests', async (req, reply) => {
+  const a = guard(req, reply, 'friend'); if (!a) return;
+  const p = page(req.query, 20, 50);
+  return reply.send({ ok: true, tests: cdb.speedTests(a.user.id, p.limit, p.offset), ...p });
+});
+app.get('/api/admin/speedtests', async (req, reply) => {
+  if (!guard(req, reply, 'admin')) return;
+  return reply.send({ ok: true, tests: cdb.adminSpeedTests(50) });
+});
+app.get('/api/monitor/latency', async (req, reply) => {
+  if (!guard(req, reply, 'admin')) return;
+  const [host, port] = (control.probe_endpoints[0] || '1.1.1.1:443').split(':');
+  const samples = [];
+  for (let i = 0; i < 8; i++) { const r = await probe(host, Number(port)); samples.push(r.ok ? r.ms : null); }
+  const ok = samples.filter((x) => x !== null);
+  const avg = ok.length ? ok.reduce((a, b) => a + b, 0) / ok.length : 0;
+  const peak = ok.length ? Math.max(...ok) : 0;
+  const jitter = ok.length > 1 ? ok.reduce((a, b) => a + Math.abs(b - avg), 0) / ok.length : 0;
+  return reply.send({ ok: true, current: ok.at(-1) || 0, average: +avg.toFixed(1), peak: +peak.toFixed(1),
+    jitter: +jitter.toFixed(1), packet_loss_pct: +((samples.length - ok.length) / samples.length * 100).toFixed(1),
+    target: `${host}:${port}`, samples, note: 'TCP connect probes from this host; not client-side latency.' });
 });
 
 app.get('/api/sub/:token', async (req, reply) => {
   const u = cdb.getUserByToken(req.params.token);
-  if (!u || u.revoked_at || u.enabled !== 1 || u.exhausted === 1) return reply.code(404).send({ ok: false, error: 'not_found' });
-  const uri = vlessUri(u);
+  if (!u || !accountReady(u)) return reply.code(404).send({ ok: false, error: 'not_found' });
+  const uri = vlessUri(u, req.query.device);
   if (!uri) return reply.code(404).send({ ok: false, error: 'not_found' });
   reply.header('Cache-Control', 'no-store');
   reply.type('text/plain; charset=utf-8');
@@ -529,20 +717,38 @@ function liveStats(user) {
 }
 app.server.on('upgrade', (req, socket, head) => {
   const u = new URL(req.url || '/', 'http://localhost');
-  const token = u.pathname.startsWith('/vpn/') ? u.pathname.slice('/vpn/'.length) : null;
+  let token = u.pathname.startsWith('/vpn/') ? u.pathname.slice('/vpn/'.length) : null;
   if (!token || control.vpn_mode !== 'ws') { socket.destroy(); return; }
+  let deviceId = null;
+  const dot = token.lastIndexOf('.');
+  if (dot > 0) {
+    const candidate = token.slice(dot + 1);
+    if (cdb.validDeviceId(candidate)) { token = token.slice(0, dot); deviceId = candidate; }
+  }
   const user = cdb.getUserByToken(token);
-  if (!user || user.revoked_at || user.enabled !== 1 || user.exhausted === 1 ||
-      (user.expires_at && Date.parse(user.expires_at) <= Date.now())) { socket.destroy(); return; }
+  if (!user || !accountReady(user)) { socket.destroy(); return; }
+  if (deviceId) cdb.upsertDevice(user.id, deviceId);
   wss.handleUpgrade(req, socket, head, (ws) => {
     let up;
     try { up = new WebSocket(`ws://${control.singbox_ws_host}:${control.singbox_ws_port}${control.ws_path}`); }
     catch { ws.close(); return; }
-    const pair = { client: ws, upstream: up, upBytes: 0, downBytes: 0 };
+    const pair = { client: ws, upstream: up, upBytes: 0, downBytes: 0, deviceId, lastTouch: 0, countedUp: 0, countedDown: 0 };
     if (!activeWs.has(user.id)) activeWs.set(user.id, new Set());
     activeWs.get(user.id).add(pair);
-    const sid = cdb.db.prepare('INSERT INTO connection_sessions (user_id, ts_start, remote) VALUES (?, ?, ?)')
-      .run(user.id, cdb.now(), req.socket.remoteAddress || '').lastInsertRowid;
+    const sid = cdb.db.prepare('INSERT INTO connection_sessions (user_id, ts_start, remote, device_id) VALUES (?, ?, ?, ?)')
+      .run(user.id, cdb.now(), req.socket.remoteAddress || '', deviceId).lastInsertRowid;
+    function touch() {
+      const t = Date.now();
+      if (t - pair.lastTouch < 5000) return;
+      pair.lastTouch = t;
+      const iso = cdb.now();
+      cdb.db.prepare('UPDATE connection_sessions SET last_traffic_at=? WHERE id=?').run(iso, Number(sid));
+      if (deviceId) {
+        deviceLastTraffic.set(deviceId, t);
+        cdb.addDeviceTraffic(deviceId, pair.upBytes - pair.countedUp, pair.downBytes - pair.countedDown, iso);
+        pair.countedUp = pair.upBytes; pair.countedDown = pair.downBytes;
+      }
+    }
     function finish() {
       if (pair.done) return;
       pair.done = true;
@@ -551,6 +757,9 @@ app.server.on('upgrade', (req, socket, head) => {
       cdb.db.prepare('UPDATE connection_sessions SET ts_end=?, upload_bytes=?, download_bytes=?, status=? WHERE id=?')
         .run(cdb.now(), pair.upBytes, pair.downBytes, 'closed', Number(sid));
       cdb.recordTraffic(user.id, pair.upBytes, pair.downBytes, 'ws-proxy');
+      if (deviceId && (pair.upBytes > pair.countedUp || pair.downBytes > pair.countedDown)) {
+        cdb.addDeviceTraffic(deviceId, pair.upBytes - pair.countedUp, pair.downBytes - pair.countedDown);
+      }
       bumpLiveTraffic(user.id, -pair.upBytes, -pair.downBytes);
       try { ws.close(); } catch {}
       try { up.close(); } catch {}
@@ -561,12 +770,14 @@ app.server.on('upgrade', (req, socket, head) => {
       const n = Buffer.isBuffer(d) ? d.length : Buffer.byteLength(String(d));
       pair.upBytes += n;
       bumpLiveTraffic(user.id, n, 0);
+      touch();
       if (up.readyState === WebSocket.OPEN) up.send(d); else clientQueue.push(d);
     });
     up.on('message', (d) => {
       const n = Buffer.isBuffer(d) ? d.length : Buffer.byteLength(String(d));
       pair.downBytes += n;
       bumpLiveTraffic(user.id, 0, n);
+      touch();
       if (ws.readyState === WebSocket.OPEN) ws.send(d); else upQueue.push(d);
     });
     up.on('open', () => {
@@ -604,6 +815,9 @@ function enforceQuota() {
     }
   }
   cdb.purgeSessions();
+  const t = Date.now();
+  for (const [k, v] of loginFailures) if (v.until <= t) loginFailures.delete(k);
+  for (const [k, v] of rateBuckets) if (v.reset <= t) rateBuckets.delete(k);
 }
 
 async function main() {

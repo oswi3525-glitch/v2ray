@@ -4,33 +4,46 @@
 
 | Component | Bind | Public? |
 |---|---|---|
-| Control app (Fastify: web + API + WS proxy) | `0.0.0.0:23952` | yes, via Cloudcode primary port |
-| sing-box VLESS-WS inbound | `127.0.0.1:23954`, path `/vpn` | no |
-| Admin API | same app, `/api/admin/*`, bearer of session cookie + CSRF | no separate port |
+| Control app (Fastify: web + API + speed endpoints + WS proxy) | `0.0.0.0:23952` | có, qua Cloudcode primary port |
+| sing-box VLESS-WS inbound | `127.0.0.1:23954`, path `/vpn` | không |
+| Admin API | cùng app, `/api/admin/*` (session + CSRF) | không có port riêng |
 
-Only the Node process binds the public application port; sing-box is loopback-only. There is no port sharing.
+Chỉ Node bind port public; sing-box loopback-only. Không chia sẻ port.
 
 ## Request flow
 
-- `/`, `/admin`, `/friend` → static web panel.
-- `/api/*` → REST API (Fastify) with session cookie, CSRF for writes, RBAC, rate limits.
-- `/vpn/<subscription-token>` → WebSocket upgrade. The app validates the token and user state, opens a WebSocket to `ws://127.0.0.1:23954/vpn`, and pipes binary frames in both directions while counting bytes per user.
+- `/`, `/admin`, `/friend` → SPA tĩnh (`web/index.html`, `app.js`, `style.css`), cache `no-store`.
+- `/api/*` → REST: session cookie `HttpOnly`/`SameSite=Strict`, CSRF cho mọi write, RBAC admin/friend, rate limit.
+- `/api/net/*` → endpoint đo tốc độ thật (xem `NETWORK_TEST.md`).
+- `/vpn/<token>[.<device-id>]` → WebSocket upgrade. Validate token + accountReady, parse device id, mở WS tới `ws://127.0.0.1:23954/vpn`, pipe frame hai chiều, đếm byte theo user + device.
+
+## Shadowrocket flow
+
+1. Friend mở tab Shadowrocket → web gọi `/api/friend/import?device=<id>` (backend kiểm tra session, quota, expiry, sing-box).
+2. Backend trả `uri`, `subscription_url`, `links.node`, `links.subscription`.
+3. Web lưu payload và **mở deep link đồng bộ trong user gesture** (`a.click()`), không `fetch` trước khi click.
+4. Người dùng xác nhận trong Shadowrocket; UI chỉ báo "đang mở/chờ xác nhận", không báo "đã thêm".
 
 ## VPN transport
 
-- Target: Shadowrocket connects with VLESS over WSS to `app-medium-1-ac2e.cldcode.host:443`, path `/vpn/<token>`, SNI = that hostname. TLS is terminated by Cloudflare; the app never accepts TLS itself and never uses a fake certificate.
-- Local verification uses plain WS to `127.0.0.1:23952` because there is no working public tunnel here.
-- `vpn_mode: tcp` is available in `config/control.json` for a provider that offers true raw TCP forwarding on 23952; then sing-box binds that port and the web panel must be hosted separately.
+- VLESS/WSS tới `app-medium-1-ac2e.cldcode.host:443`, path `/vpn/<token>[.<device-id>]`, Host/SNI = public host, TLS do Cloudflare terminate.
+- Device id nối sau token bằng `.` (không dùng `?d=` vì sing-box encode `?` thành `%3F`). Token là base64url nên không chứa `.`.
+- Local test dùng plain WS tới `127.0.0.1:23952`.
+- `vpn_mode: tcp` chỉ dùng khi provider có raw TCP thật.
 
-## Quota enforcement
+## Database (SQLite WAL, `database/control.db`)
 
-1. WS proxy increments up/down bytes per connection; on close it writes one `traffic_usage` row and updates the user's totals.
-2. Every 10 s the quota worker compares `used_upload + used_download` with `quota_bytes`.
-3. When exceeded: set `exhausted=1`, `enabled=0`, close all active WS connections for that user, remove UUID from the sing-box config and restart sing-box, write audit + quota history.
-4. Admin can add quota and re-enable; UUID is restored.
+Migration `schema_migrations`: v1 schema gốc, v2 `devices`/`speed_tests`/`security_events` + cột device trên sessions, v3 cột traffic tích luỹ trên `devices`. Không xoá/sửa dữ liệu cũ; quota không bị reset khi upgrade.
 
-Expected overshoot: roughly one quota-worker interval (10 s) of traffic plus in-flight frames; no hard kernel-level cap is claimed.
+Bảng chính: `admins`, `users`, `vpn_clients`, `subscriptions`, `traffic_usage`, `quota_history`, `connection_sessions`, `server_metrics`, `audit_logs`, `sessions`, `devices`, `speed_tests`, `security_events`.
 
-## Data and process model
+## Quota & device enforcement
 
-SQLite WAL in `database/control.db`; migrations in `control/db.js`; legacy `database/tiktunnel.db` preserved. Processes started with `setsid nohup` and supervised by `scripts/watchdog.sh` with an apply-lock to avoid restart races.
+1. WS proxy đếm byte; mỗi 5s ghi `last_traffic_at` và delta traffic vào `devices`; khi đóng session ghi một row `traffic_usage` + cập nhật total user.
+2. Quota worker mỗi 10s so sánh `used = used_upload + used_download` với `quota_bytes`.
+3. Vượt quota → `exhausted=1`, `enabled=0`, đóng WS, render lại sing-box (bỏ UUID), audit + quota history.
+4. Device Active khi có traffic trong 60s gần nhất; Idle khi còn session nhưng hết traffic; Offline khi không session và không traffic gần; Unknown khi thiếu dữ liệu.
+
+## Process model
+
+`scripts/start.sh` dùng `setsid nohup`; watchdog giám sát sing-box/control và có apply-lock tránh restart race. Không systemd/root.

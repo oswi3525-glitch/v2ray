@@ -94,6 +94,35 @@ async function main() {
   const expBody = await exp.text();
   check('config file export works', exp.status === 200 && /^vless:\/\//.test(expBody.trim()) &&
     /attachment; filename="tiktunnel-/.test(exp.headers.get('content-disposition') || ''));
+
+  const devId = 'aB3xY9kLmN2pQ7rS';
+  const imp = await api(`/api/friend/import?device=${devId}`, { cookie: f1.cookie });
+  check('Shadowrocket import links issued', imp.status === 200 && imp.data.ready &&
+    String(imp.data.links.node).startsWith('shadowrocket://add/vless://') &&
+    String(imp.data.links.subscription).startsWith('sub://') && String(imp.data.uri).includes(`.${devId}`));
+  const ping = await api('/api/net/ping', { cookie: f1.cookie });
+  const dl = await fetch(BASE + '/api/net/download?bytes=262144', { headers: { cookie: f1.cookie } });
+  const dlBuf = Buffer.from(await dl.arrayBuffer());
+  check('real speed-test download endpoint', ping.status === 200 && dl.status === 200 && dlBuf.length === 262144);
+  const up = await fetch(BASE + '/api/net/upload', { method: 'POST', headers: { cookie: f1.cookie, 'content-type': 'application/octet-stream' }, body: crypto.randomBytes(131072) });
+  check('real speed-test upload endpoint', up.status === 200 && (await up.json()).received === 131072);
+  const saved = await api('/api/friend/speedtest', { method: 'POST', cookie: f1.cookie, csrf: f1.data.csrf, body: {
+    mode: 'vpn', verified: false, ping_ms: 12, jitter_ms: 2, packet_loss_pct: 0,
+    download_mbps: 50, upload_mbps: 20, bytes_used: 393216, duration_s: 4, server: 'TikTunnel' } });
+  check('speed test history saved', saved.status === 201);
+  const hist = await api('/api/friend/speedtests?limit=5', { cookie: f1.cookie });
+  check('speed test history readable', hist.status === 200 && hist.data.tests.some((t) => t.mode === 'vpn'));
+  const fd = await api('/api/friend/devices', { cookie: f1.cookie });
+  const ad = await api('/api/admin/devices', { cookie: admin.cookie });
+  check('device endpoints RBAC', fd.status === 200 && ad.status === 200);
+  const sec = await api('/api/admin/security', { cookie: admin.cookie });
+  check('security events recorded', sec.status === 200 && sec.data.events.some((e) => e.action === 'import_link_issued'));
+  const rot = await api('/api/auth/login', { method: 'POST', cookie: f1.cookie,
+    body: { username: users[0].username, password: friendPw } });
+  check('session rotation invalidates old cookie', rot.status === 200 &&
+    (await api('/api/auth/me', { cookie: f1.cookie })).status === 401);
+  f1.cookie = rot.cookie;
+
   const parsed = new URL(fvpn.data.uri);
   check('VLESS URI uses Cloudcode HTTPS endpoint', parsed.hostname === cfg.public_https_host && parsed.port === '443', `${parsed.hostname}:${parsed.port}`);
   check('VLESS URI uses WebSocket + TLS', parsed.searchParams.get('type') === 'ws' && parsed.searchParams.get('security') === 'tls');

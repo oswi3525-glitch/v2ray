@@ -1,0 +1,37 @@
+[
+  {
+    "name": "unknown device before any VPN session",
+    "status": "PASS",
+    "detail": "no device row is fabricated"
+  },
+  {
+    "name": "VLESS path carries device identifier",
+    "status": "PASS",
+    "detail": "/vpn/aby5EeHpUPoYLFVkiPS_-rAPffuK3o8n.dEv1cE-5f6062b5x621"
+  },
+  {
+    "name": "real traffic through VPN with device ID",
+    "status": "PASS",
+    "detail": ""
+  },
+  {
+    "name": "device Active after traffic",
+    "status": "PASS",
+    "detail": "active down=8388767"
+  },
+  {
+    "name": "waiting 62s with open session but no traffic",
+    "status": "PASS",
+    "detail": ""
+  },
+  {
+    "name": "device Idle with open session but no recent traffic",
+    "status": "PASS",
+    "detail": "idle"
+  },
+  {
+    "name": "device Offline after VPN disconnect",
+    "status": "PASS",
+    "detail": "offline"
+  }
+]

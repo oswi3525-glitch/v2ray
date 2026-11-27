@@ -21,6 +21,10 @@ Auth: session cookie `tiktunnel_session` (HttpOnly). All mutating admin requests
 | POST | `/api/admin/users` | create friend (max `MAX_USERS`, default 3): `{username,display_name,password,quota_gb,expires_at?}` |
 | GET | `/api/admin/users/:id` | one friend + traffic history |
 | GET | `/api/admin/users/:id/export` | download `tiktunnel-<username>.txt` (one VLESS link per line) for Shadowrocket file import |
+| GET | `/api/admin/devices?limit&offset` | all devices with real VPN-session status, traffic, last seen |
+| GET | `/api/admin/speedtests` | last 50 speed-test results across users |
+| GET | `/api/admin/security` | security events + active policy summary |
+| GET | `/api/monitor/latency` | 8 real TCP probes: current/average/peak/jitter/packet loss |
 | PATCH | `/api/admin/users/:id` | `{display_name,enabled,expires_at,uuid}` |
 | DELETE | `/api/admin/users/:id` | revoke friend and VPN access |
 | POST | `/api/admin/users/:id/quota` | `{action:set|add|reduce|reset,gb}` — `set` replaces, `add`/`reduce` adjust by `gb`, `reset` sets quota to 0 (unlimited); `exhausted` is recomputed |
@@ -34,13 +38,27 @@ Auth: session cookie `tiktunnel_session` (HttpOnly). All mutating admin requests
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/api/friend/me` | own account only |
+| GET | `/api/friend/me` | own account only (no `uuid`/`subscription_token`) |
 | GET | `/api/friend/usage` | own traffic + history |
 | GET | `/api/friend/vpn` | own VLESS URI and active state |
-| GET | `/api/friend/live` | live in-flight usage + current up/down speed (bytes/s) + remaining bytes; poll every 2 s |
-| GET | `/api/friend/export` | download `tiktunnel-<username>.txt` (one VLESS link per line) for Shadowrocket file import |
+| GET | `/api/friend/live` | live in-flight usage + current up/down speed (bytes/s) + remaining bytes; poll every 5 s |
+| GET | `/api/friend/export?device` | download `tiktunnel-<username>.txt` (one VLESS link per line) for Shadowrocket file import |
+| GET | `/api/friend/import?device` | validate session/quota/server, return VLESS URI, subscription URL and Shadowrocket deep links (`shadowrocket://add/...`, `sub://BASE64#remark`) |
+| GET | `/api/friend/devices?limit&offset` | own devices from real VPN sessions, with status |
+| PATCH | `/api/friend/devices/:id` | rename own device `{name}` (CSRF) |
+| POST | `/api/friend/password` | change own login password `{password}` (CSRF) |
+| POST | `/api/friend/speedtest` | save measured result `{mode,verified,ping_ms,jitter_ms,packet_loss_pct,download_mbps,upload_mbps,bytes_used,duration_s,server}` (CSRF) |
+| GET | `/api/friend/speedtests?limit&offset` | own test history |
 | GET | `/api/friend/subscription` | own subscription URL/token |
 | GET | `/api/sub/:token?raw=1` | public-by-token subscription (base64 default, raw if `raw=1`) |
+
+## Speed test (friend session required)
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/api/net/ping` | server timestamp for client-side RTT/jitter/loss sampling |
+| GET | `/api/net/download?bytes=N` | real payload, 1 KiB ≤ N ≤ 8 MiB |
+| POST | `/api/net/upload` | `application/octet-stream`, bodyLimit 2 MiB, returns `{received}` |
 
 ## Monitoring
 

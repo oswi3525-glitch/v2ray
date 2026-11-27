@@ -75,6 +75,46 @@
     "detail": ""
   },
   {
+    "name": "Shadowrocket import links issued",
+    "status": "PASS",
+    "detail": ""
+  },
+  {
+    "name": "real speed-test download endpoint",
+    "status": "PASS",
+    "detail": ""
+  },
+  {
+    "name": "real speed-test upload endpoint",
+    "status": "PASS",
+    "detail": ""
+  },
+  {
+    "name": "speed test history saved",
+    "status": "PASS",
+    "detail": ""
+  },
+  {
+    "name": "speed test history readable",
+    "status": "PASS",
+    "detail": ""
+  },
+  {
+    "name": "device endpoints RBAC",
+    "status": "PASS",
+    "detail": ""
+  },
+  {
+    "name": "security events recorded",
+    "status": "PASS",
+    "detail": ""
+  },
+  {
+    "name": "session rotation invalidates old cookie",
+    "status": "PASS",
+    "detail": ""
+  },
+  {
     "name": "VLESS URI uses Cloudcode HTTPS endpoint",
     "status": "PASS",
     "detail": "app-medium-1-ac2e.cldcode.host:443"

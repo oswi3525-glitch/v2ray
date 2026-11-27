@@ -1,0 +1,37 @@
+# CHANGELOG.md
+
+## 2.1.0 — Major UX, Network & Security upgrade
+
+### Added
+- `GET /api/friend/import`: xác thực session, kiểm tra quota/expiry/sing-box, sinh VLESS URI riêng cho account + device, trả deep link Shadowrocket dạng `shadowrocket://add/<vless-uri>` (node) và `sub://<base64(sub-url)>#remark` (subscription), kèm fallback copy/file/URL.
+- Device identifier trong WS path: `/vpn/<token>.<device-id>` (an toàn với bộ parse của sing-box; `?d=` bị sing-box mã hoá thành `%3F` nên không dùng).
+- `devices`, `speed_tests`, `security_events` + migration DB v2/v3; `connection_sessions.device_id`, `last_traffic_at`; `devices.upload_bytes/download_bytes`.
+- `/api/friend/devices`, `/api/admin/devices`, PATCH rename device (chỉ device của chính mình).
+- Network Test: `/api/net/ping`, `/api/net/download` (≤8 MiB), `/api/net/upload` (≤2 MiB), `/api/friend/speedtest`, `/api/friend/speedtests`; lịch sử tối đa 100/user.
+- `/api/monitor/latency` (current/average/peak/jitter/packet loss từ TCP probe thật), `/api/admin/security`.
+- Đổi mật khẩu cho friend (`/api/friend/password`).
+- Redesign UI: tab-based Admin (8 tab) và Friend (6 tab), gauge SVG cho tốc độ, skeleton/empty/error state, modal xác nhận, light mode, responsive mobile-first.
+- `tests/network-benchmark.js`, `tests/device-activity-test.js`.
+
+### Changed
+- Session rotation sau login (cookie cũ bị vô hiệu khi đăng nhập lại), logout yêu cầu CSRF.
+- Login lockout 5 lần thất bại / 15 phút theo `ip|username`, ghi `security_events`.
+- `/api/friend/me` và `/api/friend/usage` không trả `uuid`/`subscription_token`.
+- Subscription endpoint chặn cả trường hợp `used >= quota` trực tiếp, không chỉ cờ `exhausted`.
+- Web live polling giảm từ 2s → 5s; header CSP/Permissions-Policy siết thêm.
+- Quota `reduce`/`reset` được sửa từ "cộng" sang "trừ"/"về 0"; `exhausted` được tính lại theo quota mới.
+
+### Fixed
+- Deep link cũ dùng `shadowrocket://subscribe?url=...` (không có trong handbook) và `shadowrocket://add/<base64>` (sai payload). Thay bằng cơ chế có nguồn: handbook `shadowrocket://add/{url}` và `sub://BASE64#REMARK` (đã được 3x-ui xác nhận).
+- UI không báo "thành công" khi mới chỉ mở app; yêu cầu xác nhận trong Shadowrocket.
+- Test MAX_USERS cứng "max 2" trong khi config là 3; test giờ lấy `envcfg.maxUsers`.
+
+### Verification
+- `npm test`: 34/34 PASS.
+- `node tests/device-activity-test.js`: 7/7 PASS (traffic thật 8 MiB qua sing-box).
+- `npm audit`: 0 vulnerabilities.
+- Benchmark trước/sau: `PERFORMANCE_REPORT.md`.
+
+### Không làm
+- Không đổi kernel/sysctl (cần root), không tune sing-box "mù"; giữ cấu hình DNS/transport như cũ vì không có bằng chứng đo được về cải thiện.
+- Không tạo dữ liệu giả, không có iPhone thật / Cloudcode WS end-to-end — xem báo cáo.

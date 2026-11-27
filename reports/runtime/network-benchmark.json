@@ -1,0 +1,92 @@
+{
+  "measured_at": "2026-11-27T14:28:42.154Z",
+  "note": "Local loopback measurements to the TikTunnel endpoint. Not a substitute for iOS/Cloudcode client tests.",
+  "api_rtt_ms": {
+    "min": 0.66,
+    "median": 0.82,
+    "max": 2.21,
+    "samples": [
+      1.78,
+      2.21,
+      1.73,
+      1.45,
+      1.04,
+      1.44,
+      1.48,
+      0.86,
+      0.83,
+      0.69,
+      0.72,
+      0.82,
+      0.73,
+      0.71,
+      0.66,
+      0.76,
+      0.68,
+      0.74,
+      0.73,
+      0.68
+    ]
+  },
+  "download_mbps": {
+    "samples": [
+      1108.86,
+      1327.57,
+      1688.22,
+      1488.46
+    ],
+    "median": 1488.46
+  },
+  "bytes_transferred": 4194304,
+  "tcp_probes": {
+    "1.1.1.1:443": {
+      "samples": [
+        2.39,
+        2.04,
+        1.75,
+        1.77,
+        1.99,
+        2.05,
+        2.12,
+        1.96
+      ],
+      "average_ms": 2.01,
+      "peak_ms": 2.39,
+      "packet_loss_pct": 0
+    },
+    "8.8.8.8:443": {
+      "samples": [
+        2.42,
+        5.96,
+        1.98,
+        2.66,
+        1.92,
+        2.17,
+        2.42,
+        2
+      ],
+      "average_ms": 2.69,
+      "peak_ms": 5.96,
+      "packet_loss_pct": 0
+    },
+    "app-medium-1-ac2e.cldcode.host:443": {
+      "samples": [
+        171.2,
+        151.74,
+        3.07,
+        2.49,
+        2.36,
+        2.53,
+        2.06,
+        150.82
+      ],
+      "average_ms": 60.78,
+      "peak_ms": 171.2,
+      "packet_loss_pct": 0
+    }
+  },
+  "host": {
+    "cpu_pct": 36.62,
+    "ram_used_kb": 2738364
+  }
+}

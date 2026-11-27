@@ -133,6 +133,67 @@ function migrate() {
       throw e;
     }
   }
+  if (!applied.has(2)) {
+    db.exec('BEGIN');
+    try {
+      db.exec(`
+        CREATE TABLE devices (
+          id TEXT PRIMARY KEY,
+          user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          name TEXT NOT NULL DEFAULT '',
+          first_seen TEXT NOT NULL,
+          last_seen TEXT NOT NULL,
+          last_traffic_at TEXT
+        );
+        CREATE INDEX idx_devices_user ON devices(user_id, last_seen DESC);
+        CREATE TABLE speed_tests (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          ts TEXT NOT NULL,
+          mode TEXT NOT NULL,
+          verified INTEGER NOT NULL DEFAULT 0,
+          ping_ms REAL NOT NULL DEFAULT 0,
+          jitter_ms REAL NOT NULL DEFAULT 0,
+          packet_loss_pct REAL NOT NULL DEFAULT 0,
+          download_mbps REAL NOT NULL DEFAULT 0,
+          upload_mbps REAL NOT NULL DEFAULT 0,
+          bytes_used INTEGER NOT NULL DEFAULT 0,
+          duration_s REAL NOT NULL DEFAULT 0,
+          server TEXT NOT NULL DEFAULT ''
+        );
+        CREATE INDEX idx_speed_user_ts ON speed_tests(user_id, id DESC);
+        CREATE TABLE security_events (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          ts TEXT NOT NULL,
+          actor TEXT NOT NULL,
+          action TEXT NOT NULL,
+          target TEXT NOT NULL DEFAULT '',
+          ip TEXT NOT NULL DEFAULT '',
+          detail TEXT NOT NULL DEFAULT ''
+        );
+        CREATE INDEX idx_security_ts ON security_events(id DESC);
+      `);
+      const cols = new Set(db.prepare('PRAGMA table_info(connection_sessions)').all().map((r) => r.name));
+      if (!cols.has('device_id')) db.exec('ALTER TABLE connection_sessions ADD COLUMN device_id TEXT');
+      if (!cols.has('last_traffic_at')) db.exec('ALTER TABLE connection_sessions ADD COLUMN last_traffic_at TEXT');
+      db.exec('CREATE INDEX IF NOT EXISTS idx_sessions_device ON connection_sessions(device_id, id DESC)');
+      db.prepare('INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)').run(2, now());
+      db.exec('COMMIT');
+    } catch (e) {
+      db.exec('ROLLBACK');
+      throw e;
+    }
+  }
+  if (!applied.has(3)) {
+    db.exec('BEGIN');
+    try {
+      const cols = new Set(db.prepare('PRAGMA table_info(devices)').all().map((r) => r.name));
+      if (!cols.has('upload_bytes')) db.exec('ALTER TABLE devices ADD COLUMN upload_bytes INTEGER NOT NULL DEFAULT 0');
+      if (!cols.has('download_bytes')) db.exec('ALTER TABLE devices ADD COLUMN download_bytes INTEGER NOT NULL DEFAULT 0');
+      db.prepare('INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)').run(3, now());
+      db.exec('COMMIT');
+    } catch (e) { db.exec('ROLLBACK'); throw e; }
+  }
   return applied;
 }
 migrate();
@@ -333,11 +394,77 @@ function auditLogs(limit = 50) {
   return db.prepare('SELECT ts, actor, action, target, detail FROM audit_logs ORDER BY id DESC LIMIT ?').all(limit);
 }
 
+function validDeviceId(id) {
+  return typeof id === 'string' && /^[A-Za-z0-9_-]{8,64}$/.test(id);
+}
+function upsertDevice(userId, deviceId, ts = now()) {
+  if (!validDeviceId(deviceId)) return null;
+  db.prepare(`INSERT INTO devices (id,user_id,name,first_seen,last_seen) VALUES (?,?,?,?,?)
+    ON CONFLICT(id) DO UPDATE SET last_seen=excluded.last_seen, user_id=excluded.user_id`)
+    .run(deviceId, Number(userId), '', ts, ts);
+  return getDevice(Number(userId), deviceId);
+}
+function getDevice(userId, deviceId) {
+  return db.prepare('SELECT * FROM devices WHERE id=? AND user_id=?').get(deviceId, userId);
+}
+function touchDevice(deviceId, traffic = false, ts = now()) {
+  if (!validDeviceId(deviceId)) return;
+  if (traffic) db.prepare('UPDATE devices SET last_seen=?, last_traffic_at=? WHERE id=?').run(ts, ts, deviceId);
+  else db.prepare('UPDATE devices SET last_seen=? WHERE id=?').run(ts, deviceId);
+}
+function addDeviceTraffic(deviceId, up, down, ts = now()) {
+  if (!validDeviceId(deviceId)) return;
+  db.prepare('UPDATE devices SET upload_bytes=upload_bytes+?, download_bytes=download_bytes+?, last_seen=?, last_traffic_at=? WHERE id=?')
+    .run(Math.max(0, up), Math.max(0, down), ts, ts, deviceId);
+}
+function setDeviceName(userId, deviceId, name) {
+  const clean = String(name || '').trim().slice(0, 40);
+  return db.prepare('UPDATE devices SET name=? WHERE id=? AND user_id=?').run(clean, deviceId, Number(userId)).changes > 0;
+}
+const deviceSelect = `d.*,
+  (SELECT COUNT(*) FROM connection_sessions s WHERE s.device_id=d.id AND s.ts_end IS NULL) AS open_sessions,
+  (SELECT MAX(s.ts_start) FROM connection_sessions s WHERE s.device_id=d.id) AS last_session_start`;
+function listDevices(userId, limit = 50, offset = 0) {
+  return db.prepare(`SELECT ${deviceSelect} FROM devices d WHERE d.user_id=? ORDER BY d.last_seen DESC LIMIT ? OFFSET ?`)
+    .all(Number(userId), limit, offset);
+}
+function adminDevices(limit = 50, offset = 0) {
+  return db.prepare(`SELECT ${deviceSelect}, u.username, u.display_name FROM devices d
+    JOIN users u ON u.id=d.user_id ORDER BY d.last_seen DESC LIMIT ? OFFSET ?`).all(limit, offset);
+}
+function addSpeedTest(r) {
+  return db.prepare(`INSERT INTO speed_tests (user_id,ts,mode,verified,ping_ms,jitter_ms,packet_loss_pct,
+    download_mbps,upload_mbps,bytes_used,duration_s,server) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`)
+    .run(r.user_id, now(), r.mode, r.verified ? 1 : 0, r.ping_ms, r.jitter_ms, r.packet_loss_pct,
+      r.download_mbps, r.upload_mbps, r.bytes_used, r.duration_s, r.server).lastInsertRowid;
+}
+function speedTests(userId, limit = 20, offset = 0) {
+  return db.prepare('SELECT * FROM speed_tests WHERE user_id=? ORDER BY id DESC LIMIT ? OFFSET ?')
+    .all(Number(userId), limit, offset);
+}
+function adminSpeedTests(limit = 50) {
+  return db.prepare('SELECT t.*, u.username FROM speed_tests t JOIN users u ON u.id=t.user_id ORDER BY t.id DESC LIMIT ?').all(limit);
+}
+function purgeSpeedTests(keepPerUser = 100) {
+  db.prepare(`DELETE FROM speed_tests WHERE id IN (
+    SELECT id FROM (SELECT id, ROW_NUMBER() OVER (PARTITION BY user_id ORDER BY id DESC) AS rn FROM speed_tests) WHERE rn > ?
+  )`).run(keepPerUser);
+}
+function securityEvent(actor, action, target = '', ip = '', detail = '') {
+  db.prepare('INSERT INTO security_events (ts,actor,action,target,ip,detail) VALUES (?,?,?,?,?,?)')
+    .run(now(), String(actor), String(action), String(target), String(ip), String(detail));
+}
+function securityEvents(limit = 100) {
+  return db.prepare('SELECT * FROM security_events ORDER BY id DESC LIMIT ?').all(limit);
+}
+
 module.exports = {
   ROOT, DB_PATH, db, now, audit, getSetting, setSetting,
   adminExists, createAdmin, seedAdminFromEnv, getAdmin, updateAdminHash,
   friendCount, listUsers, getUser, getUserByUsername, getUserByToken, getVpnClient, getSubscription,
   createFriend, setFriendPassword, changeQuota, setUserState, revokeFriend,
   recordTraffic, trafficHistory, openSession, getSession, deleteSession, purgeSessions,
-  addMetric, metrics, activeVpnUsers, auditLogs
+  addMetric, metrics, activeVpnUsers, auditLogs,
+  validDeviceId, upsertDevice, getDevice, touchDevice, addDeviceTraffic, setDeviceName, listDevices, adminDevices,
+  addSpeedTest, speedTests, adminSpeedTests, purgeSpeedTests, securityEvent, securityEvents
 };
