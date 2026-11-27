@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0a0e14">
+<title>Kiểm tra gói cước — TikTunnel</title>
+<link rel="stylesheet" href="/style.css?v=__VER__">
+<script src="/plan-check.js?v=__VER__" defer></script>
+</head>
+<body>
+<div class="wrap">
+  <header class="topbar">
+    <div class="brand"><span class="brand-mark">T</span><span><b>Kiểm tra gói cước</b><small>TikTunnel · đo từ thiết bị của bạn</small></span></div>
+    <a class="btn ghost" href="/">Về dashboard</a>
+  </header>
+  <div class="card">
+    <h2>Công cụ đo khả năng truy cập</h2>
+    <p class="sub">Chạy trang này <b>trên chính SIM cần kiểm tra và khi VPN đang TẮT</b>. Các phép đo được thực hiện thật từ trình duyệt, không có dữ liệu giả.</p>
+    <p class="sub warn-note">Công cụ chỉ đo kết nối. Không giả mạo SNI/Host/DNS hay lưu lượng TikTok, không bypass hệ thống tính cước của nhà mạng, và không khẳng định VPN “miễn phí data” khi chưa có bằng chứng từ nhà mạng.</p>
+    <div class="row"><button id="run">Chạy kiểm tra</button><button class="ghost" id="clear">Xóa kết quả</button></div>
+  </div>
+  <div class="card"><h2>Kết quả</h2><div id="result"></div></div>
+  <div class="card"><h2>Cách đọc kết quả</h2>
+    <ol class="steps">
+      <li><b>TikTok OK · Internet thường FAIL</b> → thiết bị đang ở trạng thái gói TikTok đơn lẻ.</li>
+      <li>Nếu trong trạng thái đó <b>endpoint TikTunnel FAIL</b> → gói TikTok <b>không</b> cho phép truy cập máy chủ VPN. Không có cách hợp lệ để dùng VPN với gói này; hãy dùng gói Internet thông thường.</li>
+      <li>Nếu endpoint vẫn OK → chỉ chứng minh <b>có kết nối tới endpoint</b>; phạm vi tính cước của lưu lượng VPN vẫn phải do Viettel xác nhận. Không tự coi là miễn phí.</li>
+      <li>Sau khi bật VPN, chạy lại Network Test trong dashboard để đo chất lượng đường đi thực tế.</li>
+    </ol>
+  </div>
+</div>
+</body>
+</html>

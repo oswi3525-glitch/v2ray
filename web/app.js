@@ -485,7 +485,8 @@ async function friendView() {
       <p class="sub">Sẽ mở Shadowrocket và chờ bạn xác nhận thêm server. Chưa coi là thành công cho tới khi bạn xác nhận trong app.</p>
       <div class="row"><button class="ghost" id="copy-uri">Copy VLESS URI</button>
       <a class="btn ghost" href="${esc(i.fallback.open_url)}" target="_blank" rel="noopener">Mở subscription URL</a>
-      <a class="btn ghost" href="${esc(i.fallback.file_url)}">Tải file .txt</a></div>
+      <a class="btn ghost" href="${esc(i.fallback.file_url)}">Tải file .txt</a>
+      <a class="btn ghost" href="/plan-check">Kiểm tra gói cước / TikTok</a></div>
       <details class="adv"><summary>Xem cấu hình được sinh ra</summary><p class="mono">${esc(i.uri)}</p></details>`
       : emptyState('Không lấy được cấu hình', i.error)}
       <ol class="steps"><li>Bấm <b>Add to Shadowrocket</b> để iOS mở app.</li>

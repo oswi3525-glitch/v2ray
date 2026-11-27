@@ -70,7 +70,17 @@ Không thực hiện giả mạo SNI/Host/DNS/domain fronting, không ngụy tra
 
 ## 7. Kết quả với gói TikTok đơn lẻ
 
-**Chưa thể kiểm thử và không khẳng định hoạt động.** Lý do: (1) không có SIM Viettel/gói TikTok; (2) endpoint VPN không nằm trong danh sách ưu đãi đã biết; (3) không được phép giả mạo lưu lượng. Không có bằng chứng xác thực nào cho phép nói gói TikTok đơn lẻ dùng được TikTunnel.
+**Chưa thể kiểm thử từ workspace này và không khẳng định hoạt động.** Lý do: (1) không có SIM Viettel/gói TikTok; (2) endpoint VPN không nằm trong danh sách ưu đãi đã biết; (3) không được phép giả mạo lưu lượng. Không có bằng chứng xác thực nào cho phép nói gói TikTok đơn lẻ dùng được TikTunnel.
+
+Để có bằng chứng thật, đã thêm công cụ đo **từ chính thiết bị/SIM** (không phải từ server):
+
+- Trang công khai `/plan-check` (files `web/plan-check.html`, `web/plan-check.js`), liên kết từ tab Shadowrocket trong dashboard.
+- Cách dùng: mở trang trên điện thoại đang lắp SIM cần kiểm tra, **tắt VPN**, bấm “Chạy kiểm tra”.
+- Các phép đo thật: (a) `https://www.tiktok.com/` (no-cors, đo thời gian phản hồi); (b) `https://example.com/` làm đại diện Internet thường; (c) `GET /health` trên endpoint TikTunnel; (d) DNS/TCP thô → **UNKNOWN**, vì trình duyệt không có API đo các lớp đó — không tự đánh dấu PASS.
+- Kết luận tự động theo 4 hồ sơ: TikTok OK + Internet FAIL = gói TikTok đơn lẻ; nếu endpoint cũng FAIL → VPN **không dùng được** với gói này; nếu endpoint OK → **chỉ** chứng minh có kết nối, phạm vi tính cước vẫn chưa xác minh; có Internet thường → dùng được quy trình import bình thường.
+- Công cụ **không** đổi SNI/Host/DNS, không ngụy trang lưu lượng thành TikTok, không bypass kiểm soát/tính cước; mọi kết luận đều kèm timestamp, thời gian phản hồi và thông báo rõ giới hạn.
+
+Kết quả đo thực tế trên SIM Viettel/TikTok vẫn **chưa có** — cần người dùng chạy công cụ trên thiết bị thật. Không tuyên bố “Internet miễn phí”.
 
 ## 8. Giới hạn do Cloudcode / nhà mạng
 

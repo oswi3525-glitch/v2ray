@@ -194,7 +194,7 @@ function readStatic(name, type) {
   return (req, reply) => {
     reply.header('Cache-Control', 'no-store, max-age=0');
     let body = fs.readFileSync(path.join(ROOT, 'web', name));
-    if (name === 'index.html') {
+    if (name.endsWith('.html')) {
       const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
       body = Buffer.from(body.toString('utf8').replace(/__VER__/g, pkg.version));
     }
@@ -207,6 +207,8 @@ for (const p of ['/', '/admin', '/friend', '/setup', '/login']) {
 app.get('/style.css', readStatic('style.css', 'text/css; charset=utf-8'));
 app.get('/app.js', readStatic('app.js', 'application/javascript; charset=utf-8'));
 app.get('/boot-guard.js', readStatic('boot-guard.js', 'application/javascript; charset=utf-8'));
+app.get('/plan-check', readStatic('plan-check.html', 'text/html; charset=utf-8'));
+app.get('/plan-check.js', readStatic('plan-check.js', 'application/javascript; charset=utf-8'));
 app.get('/health', async () => ({ ok: true, service: 'tiktunnel-control', uptime_s: Math.floor((Date.now() - startedAt) / 1000) }));
 
 app.post('/api/auth/login', async (req, reply) => {
