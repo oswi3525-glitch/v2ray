@@ -6,16 +6,19 @@ const path = require('node:path');
 const ROOT = path.resolve(__dirname, '..');
 const settings = JSON.parse(fs.readFileSync(path.join(ROOT, 'config', 'settings.json'), 'utf8'));
 
-const fileEnv = {};
-const envFile = path.join(ROOT, 'config', 'env');
-if (fs.existsSync(envFile)) {
-  for (const line of fs.readFileSync(envFile, 'utf8').split(/\r?\n/)) {
+function parseEnvFile(file) {
+  const out = {};
+  if (!fs.existsSync(file)) return out;
+  for (const line of fs.readFileSync(file, 'utf8').split(/\r?\n/)) {
     const m = line.match(/^\s*([A-Z][A-Z0-9_]*)\s*=\s*(.*?)\s*$/);
-    if (m) fileEnv[m[1]] = m[2];
+    if (m) out[m[1]] = m[2];
   }
+  return out;
 }
 
-const env = { ...fileEnv, ...process.env };
+const legacyEnv = parseEnvFile(path.join(ROOT, 'config', 'env'));
+const dotEnv = parseEnvFile(path.join(ROOT, '.env'));
+const env = { ...legacyEnv, ...dotEnv, ...process.env };
 
 module.exports = {
   ROOT,

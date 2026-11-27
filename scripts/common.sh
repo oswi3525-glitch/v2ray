@@ -4,6 +4,11 @@ set -u
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 export ROOT
+if [ -f "$ROOT/.env" ]; then
+  set -a
+  . "$ROOT/.env"
+  set +a
+fi
 PID_DIR="$ROOT/logs"
 SB_PID="$PID_DIR/sing-box.pid"
 API_PID="$PID_DIR/api.pid"
