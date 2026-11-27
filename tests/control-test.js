@@ -90,6 +90,10 @@ async function main() {
   check('friend sees own data only', fme.status === 200 && fme.data.user.id === users[0].id);
   const fvpn = await api('/api/friend/vpn', { cookie: f2.cookie });
   check('friend VPN config generated', fvpn.status === 200 && String(fvpn.data.uri).startsWith('vless://'), String(fvpn.data.mode));
+  const exp = await fetch(BASE + '/api/friend/export', { headers: { cookie: f1.cookie } });
+  const expBody = await exp.text();
+  check('config file export works', exp.status === 200 && /^vless:\/\//.test(expBody.trim()) &&
+    /attachment; filename="tiktunnel-/.test(exp.headers.get('content-disposition') || ''));
   const parsed = new URL(fvpn.data.uri);
   check('VLESS URI uses Cloudcode HTTPS endpoint', parsed.hostname === cfg.public_https_host && parsed.port === '443', `${parsed.hostname}:${parsed.port}`);
   check('VLESS URI uses WebSocket + TLS', parsed.searchParams.get('type') === 'ws' && parsed.searchParams.get('security') === 'tls');

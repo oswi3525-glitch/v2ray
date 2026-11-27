@@ -20,6 +20,7 @@ Auth: session cookie `tiktunnel_session` (HttpOnly). All mutating admin requests
 | GET | `/api/admin/users` | all friends incl. UUID, token, quota, usage |
 | POST | `/api/admin/users` | create friend (max `MAX_USERS`, default 3): `{username,display_name,password,quota_gb,expires_at?}` |
 | GET | `/api/admin/users/:id` | one friend + traffic history |
+| GET | `/api/admin/users/:id/export` | download `tiktunnel-<username>.txt` (one VLESS link per line) for Shadowrocket file import |
 | PATCH | `/api/admin/users/:id` | `{display_name,enabled,expires_at,uuid}` |
 | DELETE | `/api/admin/users/:id` | revoke friend and VPN access |
 | POST | `/api/admin/users/:id/quota` | `{action:set|add|reduce|reset,gb}` — `set` replaces, `add`/`reduce` adjust by `gb`, `reset` sets quota to 0 (unlimited); `exhausted` is recomputed |
@@ -37,6 +38,7 @@ Auth: session cookie `tiktunnel_session` (HttpOnly). All mutating admin requests
 | GET | `/api/friend/usage` | own traffic + history |
 | GET | `/api/friend/vpn` | own VLESS URI and active state |
 | GET | `/api/friend/live` | live in-flight usage + current up/down speed (bytes/s) + remaining bytes; poll every 2 s |
+| GET | `/api/friend/export` | download `tiktunnel-<username>.txt` (one VLESS link per line) for Shadowrocket file import |
 | GET | `/api/friend/subscription` | own subscription URL/token |
 | GET | `/api/sub/:token?raw=1` | public-by-token subscription (base64 default, raw if `raw=1`) |
 

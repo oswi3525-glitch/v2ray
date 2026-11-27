@@ -118,6 +118,7 @@ async function adminPage() {
       <button class="small ghost" data-copy="uri" data-id="${u.id}">Copy VLESS</button>
       <button class="small ghost" data-copy="sub" data-id="${u.id}">Copy Sub</button>
       <button class="small ghost" data-shadow data-id="${u.id}">Add to Shadowrocket</button>
+      <button class="small ghost" data-export data-id="${u.id}">Export file</button>
       <button class="small ghost" data-act="disable" data-id="${u.id}">Disable</button>
       <button class="small ghost" data-act="enable" data-id="${u.id}">Enable</button>
       <button class="small danger" data-act="delete" data-id="${u.id}">Revoke</button>
@@ -140,7 +141,9 @@ async function adminPage() {
       <button class="ghost" id="shadow-add-node">Add single node</button>
       <button class="ghost" id="shadow-copy-uri">Copy VLESS URI</button>
       <button class="ghost" id="shadow-copy">Copy subscription</button>
-    </div>` : '<p class="sub">No friend accounts yet. Create one below first.</p>'}
+      <button class="ghost" id="shadow-export">Export file (.txt)</button>
+    </div>
+    <p class="sub">Xuất file: tải file <span class="mono">.txt</span> chứa 1 link VLESS, rồi mở Shadowrocket → <b>+</b> → <b>Import From File</b> → chọn file để thêm server.</p>` : '<p class="sub">No friend accounts yet. Create one below first.</p>'}
   </div>
   <div class="card"><h2>Create friend</h2><form id="create">
     <div class="row"><div style="flex:1;min-width:140px"><label>Username</label><input id="nu" required></div>
@@ -191,6 +194,9 @@ async function adminPage() {
     const u = us.users.find(x => x.id === Number(b.dataset.id));
     try { shadowrocketFor(u, 'sub'); } catch (err) { toast(err.message); }
   });
+  document.querySelectorAll('[data-export]').forEach(b => b.onclick = () => {
+    location.href = `/api/admin/users/${b.dataset.id}/export`;
+  });
   if (document.getElementById('shadow-add')) {
     document.getElementById('shadow-add').onclick = () => {
       const u = us.users.find(x => x.id === Number(document.getElementById('shadow-user').value));
@@ -207,6 +213,9 @@ async function adminPage() {
     document.getElementById('shadow-copy-uri').onclick = () => {
       const u = us.users.find(x => x.id === Number(document.getElementById('shadow-user').value));
       copy(u?.vless_uri || '');
+    };
+    document.getElementById('shadow-export').onclick = () => {
+      location.href = `/api/admin/users/${document.getElementById('shadow-user').value}/export`;
     };
   }
   document.querySelectorAll('[data-act]').forEach(b => b.onclick = async () => {
@@ -264,6 +273,15 @@ async function friendPage() {
     <details class="adv"><summary>Xem cấu hình VLESS</summary><p class="mono">${esc(v.uri || 'No configuration available')}</p></details>
     <p class="sub">Trên iPhone: bấm “Add to Shadowrocket” để app mở và tự tạo server. Nếu không mở, URI đã được copy — vào Shadowrocket → + → Import from Clipboard.</p>
   </div>
+  <div class="card export-card"><h2>Xuất file cấu hình</h2>
+    <p class="sub">Tải file <span class="mono">.txt</span> chứa link VLESS của bạn, rồi thêm server trong Shadowrocket bằng file này.</p>
+    <ol class="steps">
+      <li>Bấm <b>Tải file .txt</b> — file sẽ được lưu vào <b>Files</b> trên iPhone.</li>
+      <li>Mở Shadowrocket → góc trên bên phải <b>+</b> → chọn <b>Import From File</b>.</li>
+      <li>Chọn file vừa tải → app tự thêm server → bật kết nối.</li>
+    </ol>
+    <button id="exportfile">Tải file .txt</button>
+  </div>
   <div class="card"><h2>Lưu lượng theo thời gian</h2><canvas id="chart" height="120"></canvas></div>`);
   document.getElementById('copyuri').onclick = () => copy(v.uri || '');
   document.getElementById('copysub').onclick = () => copy(`${location.origin}${sub.url}`);
@@ -273,6 +291,7 @@ async function friendPage() {
   document.getElementById('addios-node').onclick = () => {
     try { shadowrocketFor({ vless_uri: v.uri, subscription_token: sub.token }, 'node'); } catch (err) { toast(err.message); }
   };
+  document.getElementById('exportfile').onclick = () => { location.href = '/api/friend/export'; };
   async function refreshLive() {
     try {
       const d = await api('/api/friend/live');

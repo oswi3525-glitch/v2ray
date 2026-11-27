@@ -23,10 +23,21 @@ TLS được terminate tại Cloudflare / HTTPS tunnel. Đường dẫn `/vpn/<t
 |---|---|---|
 | **Add to Shadowrocket** (chính) | `shadowrocket://subscribe?url=<encoded-sub-url>` | Mở app, tạo subscription và tự tạo các server bên trong |
 | **Add single node** | `shadowrocket://add/<base64(vless-uri)>` | Mở app và tạo đúng 1 node VLESS |
+| **Export file (.txt)** | `GET /api/friend/export` (hoặc `/api/admin/users/:id/export`) | Tải file chứa 1 link VLESS để thêm server bằng file |
 
 Trước khi mở app, web panel **copy VLESS URI vào clipboard** để dự phòng. Nếu iOS không mở được custom scheme, dùng **Copy VLESS URI** → Shadowrocket → `+` → **Import from Clipboard**, hoặc mở subscription URL trong Safari.
 
 Lưu ý: navigation tới custom scheme được tạo đồng bộ bằng phần tử `<a>` trong cùng user gesture — không `fetch` trước khi mở app (iOS Safari chặn custom scheme sau `await`).
+
+## Thêm server bằng file (.txt)
+
+File xuất ra có tên `tiktunnel-<username>.txt`, nội dung là 1 dòng VLESS URI duy nhất, kèm header `Content-Disposition: attachment`. Cách dùng:
+
+1. Bấm **Export file (.txt)** trong dashboard (friend hoặc admin) → file tải về và nằm trong app **Files** của iPhone.
+2. Mở Shadowrocket → góc trên phải **`+`** → **Import From File**.
+3. Chọn file vừa tải → app tự thêm server → chọn server và bật kết nối.
+
+File là bản sao tĩnh của cấu hình; muốn tự cập nhật node thì dùng subscription URL thay vì file.
 
 Tổng số account: Admin + tối đa `MAX_USERS` friend (mặc định 3).
 

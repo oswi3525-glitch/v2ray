@@ -8,7 +8,8 @@
 
 1. **Add to Shadowrocket** — mở app qua `shadowrocket://subscribe?url=<subscription-url-encoded>` và tự tạo server từ subscription. Đây là cách dùng chính.
 2. **Add single node** — mở `shadowrocket://add/<base64(vless-uri)>` và tạo đúng 1 node.
-3. URI VLESS cũng được **tự động copy** khi bấm. Nếu app không mở: mở Shadowrocket → `+` → **Import from Clipboard**.
+3. **Export file (.txt)** — tải file chứa 1 link VLESS. Mở Shadowrocket → `+` → **Import From File** → chọn file để thêm server.
+4. URI VLESS cũng được **tự động copy** khi bấm. Nếu app không mở: mở Shadowrocket → `+` → **Import from Clipboard**.
 
 Admin có các nút tương tự trong thẻ **Add to Shadowrocket** (chọn account trước).
 

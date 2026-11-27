@@ -111,6 +111,16 @@ function publicUser(u) {
   };
 }
 
+function sendConfigFile(reply, u) {
+  const uri = vlessUri(u);
+  if (!uri) return reply.code(404).send({ ok: false, error: 'not_found' });
+  const name = String(u.username || 'tiktunnel').replace(/[^A-Za-z0-9_.-]/g, '_').slice(0, 40);
+  reply.header('Content-Disposition', `attachment; filename="tiktunnel-${name}.txt"`);
+  reply.header('Cache-Control', 'no-store');
+  reply.type('text/plain; charset=utf-8');
+  return reply.send(uri + '\n');
+}
+
 function vlessUri(u) {
   const v = cdb.getVpnClient(u.id);
   const s = cdb.getSubscription(u.id);
@@ -237,6 +247,12 @@ app.get('/api/admin/users/:id', async (req, reply) => {
   const u = cdb.getUser(Number(req.params.id));
   if (!u) return reply.code(404).send({ ok: false, error: 'not_found' });
   return reply.send({ ok: true, user: publicUser(u), history: cdb.trafficHistory(u.id, 30) });
+});
+app.get('/api/admin/users/:id/export', async (req, reply) => {
+  if (!guard(req, reply, 'admin')) return;
+  const u = cdb.getUser(Number(req.params.id));
+  if (!u) return reply.code(404).send({ ok: false, error: 'not_found' });
+  return sendConfigFile(reply, u);
 });
 
 app.post('/api/admin/users', async (req, reply) => {
@@ -370,6 +386,10 @@ app.get('/api/friend/subscription', async (req, reply) => {
     token: s.token,
     uri: vlessUri(a.user)
   });
+});
+app.get('/api/friend/export', async (req, reply) => {
+  const a = guard(req, reply, 'friend'); if (!a) return;
+  return sendConfigFile(reply, cdb.getUser(a.user.id) || a.user);
 });
 
 app.get('/api/sub/:token', async (req, reply) => {

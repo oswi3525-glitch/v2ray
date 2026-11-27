@@ -70,6 +70,11 @@
     "detail": "ws"
   },
   {
+    "name": "config file export works",
+    "status": "PASS",
+    "detail": ""
+  },
+  {
     "name": "VLESS URI uses Cloudcode HTTPS endpoint",
     "status": "PASS",
     "detail": "app-medium-1-ac2e.cldcode.host:443"
