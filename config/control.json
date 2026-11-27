@@ -4,6 +4,7 @@
   "singbox_ws_host": "127.0.0.1",
   "singbox_ws_port": 23954,
   "vpn_mode": "ws",
+  "singbox_version": "1.14.5",
   "ws_path": "/vpn",
   "public_https_host": "app-medium-1-ac2e.cldcode.host",
   "public_tcp_host": "vn-hn.cldcode.host",

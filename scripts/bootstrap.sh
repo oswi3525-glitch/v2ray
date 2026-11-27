@@ -28,6 +28,11 @@ chmod 600 "$ROOT"/database/*.db "$ROOT"/database/*.db-* 2>/dev/null || true
 chmod 600 "$ROOT"/subscriptions/*.txt 2>/dev/null || true
 chmod 750 "$ROOT"/scripts/*.sh
 
+if [ ! -x "$ROOT/bin/sing-box" ] || ! "$ROOT/bin/sing-box" version >/dev/null 2>&1; then
+  echo "sing-box binary missing; downloading prebuilt release..."
+  node "$ROOT/scripts/get-singbox.js"
+fi
+
 node "$ROOT/server/render-config.js"
 "$ROOT/bin/sing-box" check -c "$ROOT/config/sing-box.json"
 echo "bootstrap OK (admin token stored in config/secrets.env, chmod 600)"

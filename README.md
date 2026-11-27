@@ -3,48 +3,74 @@
 Rootless VPN control panel: **Admin + up to 2 friends**, per-user quota from real traffic, VLESS-over-WebSocket via sing-box, Node/Fastify backend, SQLite database.
 
 > **STATUS: Implemented and verified locally. Public Cloudcode path NOT verified.**
-> `vn-hn.cldcode.host:23952` returns TCP connection refused from this workspace and the HTTPS subdomain returned Cloudflare 404 to a WS upgrade. There is no Cloudcode shell here. Do not import the subscription on a real device or claim the VPN works until the Cloudcode port mapping is confirmed. See `reports/cloudcode-audit.md`.
+> `vn-hn.cldcode.host:23952` returned TCP connection refused from the earlier workspace and the HTTPS subdomain returned Cloudflare 404 to a WS upgrade. Do not import the subscription on a real device until the Cloudcode/Pterodactyl port mapping is confirmed. See `reports/cloudcode-audit.md`.
 
-## Architecture
+## Environment requirements
 
-```
-Internet -> Cloudflare HTTPS subdomain (TLS terminated at Cloudflare)
-         -> Cloudcode primary app port 23952
-         -> Node/Fastify :23952   (/ , /admin , /friend , /api , /vpn/<token>)
-         -> sing-box VLESS-WS :127.0.0.1:23954 (path /vpn)
-         -> direct outbound
-```
+- Pterodactyl on Cloudcode, Node.js 24, Linux x64, 2 GB RAM, 10 GB disk.
+- No sudo, no compiler, no Docker, no systemd.
+- Only the prebuilt `linux-amd64(-musl)` sing-box release is downloaded; no build step.
 
-Node and sing-box never share a port. TLS is not faked; the app speaks plain WS only on loopback.
+## Configuration / environment
 
-## Quick start
+Real environment variables **override** `config/env`. Copy the sample and edit only what the panel does not already provide:
 
 ```bash
-cd "$HOME/TikTunnel"
-./scripts/bootstrap.sh
-./scripts/start.sh
-./scripts/status.sh
-./scripts/health-check.sh
+cp .env.example config/env
 ```
 
-Open `http://127.0.0.1:23952/` → **Create Administrator** (first run only) → Admin dashboard → create up to 2 friends, set quota, reset password, copy UUID/VLESS/subscription.
+| Variable | Meaning |
+|---|---|
+| `SERVER_HOST` | Public VLESS hostname, currently `vn-hn.cldcode.host` |
+| `SERVER_PORT` | Port the app must **bind inside the container** |
+| `PROTOCOL` | `vless` |
+| `MAX_USERS` | 3 (Admin + 2 friends) |
+| `SINGBOX_VERSION` | Optional release pin; default comes from `config/control.json` → `singbox_version` (`1.14.5`) |
+| `TIKTUNNEL_MAX_LOG_BYTES` | Log rotation size, default 5 MiB |
+| `TIKTUNNEL_NO_WATCHDOG` | Set `1` to disable the watchdog |
 
-## Management
+**How to get the real `SERVER_PORT`:** open the Pterodactyl panel → your server → **Allocations** and use the allocated TCP port (often exposed to the container as `PORT`). If Cloudcode forwards public TCP 23952 to a different internal port, set `SERVER_PORT` to that **internal** port; the public port remains the one Cloudcode allocated. Never guess the number.
+
+The admin token is generated once into `config/secrets.env` (chmod 600) by `scripts/bootstrap.sh`. It is never printed.
+
+## Startup Command (Pterodactyl)
+
+One line, no `find -exec`, no `chmod`, no direct `./scripts/...`:
+
+```sh
+cd /home/container && git fetch --all && git reset --hard origin/main && if ! cmp -s package-lock.json node_modules/.package-lock.json; then npm ci --omit=dev --no-audit --no-fund; fi && node scripts/get-singbox.js && if [ ! -f config/secrets.env ]; then bash scripts/bootstrap.sh; fi && bash scripts/start.sh
+```
+
+`scripts/start.sh` also calls `node scripts/get-singbox.js` itself if `bin/sing-box` is missing or fails `sing-box version`, so it will not crash with `No such file or directory`.
+
+## sing-box version
+
+Default version lives in `config/control.json`:
+
+```json
+"singbox_version": "1.14.5"
+```
+
+To change it, either edit that field or set `SINGBOX_VERSION=v1.15.0` in the panel environment. `scripts/get-singbox.js` resolves the matching GitHub release, selects the `linux-x64` asset by regex (preferring the static musl build), extracts it with system `tar`, marks it executable, removes the temporary archive, and verifies with `sing-box version`. On network/API failure it exits non-zero with a clear message.
+
+## Local management
 
 ```bash
-./scripts/stop.sh ; ./scripts/restart.sh
-./scripts/backup.sh
-./scripts/restore.sh backups/<file>.tar.gz --confirm
-node control/migrate-legacy.js     # one-time import of old UUID/tokens (kept old DB)
+bash scripts/start.sh
+bash scripts/stop.sh
+bash scripts/restart.sh
+bash scripts/status.sh
+bash scripts/health-check.sh
+bash scripts/backup.sh
 ```
 
-## Tests
+## Tests (offline)
 
 ```bash
-node tests/control-test.js          # 24 PASS / 0 FAIL in last run
-node tests/control-performance.js
-node tests/control-stability.js 120
+node tests/control-test.js
 ```
+
+The test suite uses only loopback HTTP/WebSocket and local sockets; it needs no Internet access.
 
 ## Docs and reports
 

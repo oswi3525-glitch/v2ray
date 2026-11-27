@@ -6,6 +6,21 @@ source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 cd "$ROOT"
 rotate_logs
 
+ensure_singbox() {
+  if [ -x "$ROOT/bin/sing-box" ] && "$ROOT/bin/sing-box" version >/dev/null 2>&1; then
+    return 0
+  fi
+  echo "sing-box binary missing or unusable; downloading prebuilt release..."
+  node "$ROOT/scripts/get-singbox.js" || {
+    echo "FATAL: unable to obtain sing-box; check network and SINGBOX_VERSION"
+    return 1
+  }
+  [ -x "$ROOT/bin/sing-box" ] && "$ROOT/bin/sing-box" version >/dev/null 2>&1 || {
+    echo "FATAL: sing-box still unusable after download"
+    return 1
+  }
+}
+
 start_singbox() {
   if [ -n "$(sb_pids)" ]; then
     echo "sing-box already running; skipping (no duplicate allowed)"
@@ -55,6 +70,7 @@ start_watchdog() {
   log_line "watchdog started"
 }
 
+ensure_singbox
 start_singbox
 start_api
 start_watchdog
