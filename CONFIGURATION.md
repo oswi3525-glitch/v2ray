@@ -23,7 +23,7 @@ MAX_USERS=3
 
 - `SERVER_HOST`: the address written into every VLESS subscription URI.
 - `SERVER_PORT`: public TCP port allocated by Cloudcode. The listener uses this same number as the internal port until Cloudcode documents a different mapping. Real environment variables override this file.
-- `MAX_USERS`: hard cap on active accounts (revoked/expired ones do not count).
+- `MAX_USERS`: hard cap on active **friend** accounts (admin is not counted; revoked/expired friends do not count).
 - `PROTOCOL`: kept explicit for documentation/validation; the implemented inbound is VLESS.
 
 ## `config/settings.json`

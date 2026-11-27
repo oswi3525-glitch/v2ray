@@ -24,7 +24,7 @@ cp .env.example config/env
 | `SERVER_HOST` | Public VLESS hostname, currently `vn-hn.cldcode.host` |
 | `SERVER_PORT` | Port the app must **bind inside the container** |
 | `PROTOCOL` | `vless` |
-| `MAX_USERS` | 3 (Admin + 2 friends) |
+| `MAX_USERS` | 3 friends (admin not counted; 4 accounts total) |
 | `ADMIN_USERNAME` | Admin login name; seeded into SQLite at startup |
 | `ADMIN_PASSWORD` | Admin password (≥8 chars, not `CHANGE_ME…`); stored only as a bcrypt hash |
 | `SINGBOX_VERSION` | Optional release pin; default comes from `config/control.json` → `singbox_version` (`1.14.5`) |

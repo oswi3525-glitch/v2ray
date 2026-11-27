@@ -7,16 +7,31 @@ function toast(msg) {
   toastEl.textContent = msg; toastEl.hidden = false;
   clearTimeout(toast.timer); toast.timer = setTimeout(() => { toastEl.hidden = true; }, 3200);
 }
-async function api(path, opts = {}) {
+function csrfFromCookie() {
+  const item = document.cookie.split('; ').find(x => x.startsWith('tiktunnel_csrf='));
+  return item ? decodeURIComponent(item.slice('tiktunnel_csrf='.length)) : '';
+}
+async function api(path, opts = {}, refreshed = false) {
   const o = { credentials: 'same-origin', headers: {}, ...opts };
   o.headers = { ...o.headers };
   if (opts.body) o.headers['Content-Type'] = 'application/json';
-  const csrf = sessionStorage.getItem('csrf');
+  const csrf = sessionStorage.getItem('csrf') || csrfFromCookie();
   if (csrf) o.headers['x-csrf-token'] = csrf;
   const r = await fetch(path, o);
   let d = {};
   try { d = await r.json(); } catch { d = {}; }
-  if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
+  if (!r.ok) {
+    if (r.status === 401 && d.error === 'unauthorized' && !path.startsWith('/api/auth/') && !refreshed) {
+      const fresh = await fetch('/api/auth/me', { credentials: 'same-origin' }).then(x => x.json()).catch(() => ({}));
+      if (fresh.ok && fresh.csrf) {
+        sessionStorage.setItem('csrf', fresh.csrf);
+        return api(path, opts, true);
+      }
+      sessionStorage.clear();
+      location.href = '/';
+    }
+    throw new Error(d.error || `HTTP ${r.status}`);
+  }
   return d;
 }
 function esc(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
@@ -75,8 +90,8 @@ async function adminPage() {
     <div class="stat"><span>VPN</span><b>${ov.server.sing_box ? 'running' : 'stopped'}</b></div>
     <div class="stat"><span>CPU</span><b>${ov.server.cpu_pct}%</b></div>
     <div class="stat"><span>RAM used</span><b>${(ov.server.ram_used_kb / 1048576).toFixed(2)} GB</b></div>
-    <div class="stat"><span>Friends</span><b>${ov.accounts.friends}/2</b></div>
-    <div class="stat"><span>Total accounts</span><b>${ov.accounts.friends + (ov.accounts.admin ? 1 : 0)}/3</b></div>
+    <div class="stat"><span>Friends</span><b>${ov.accounts.friends}/${ov.accounts.max_friends}</b></div>
+    <div class="stat"><span>Total accounts</span><b>${ov.accounts.friends + (ov.accounts.admin ? 1 : 0)}/${ov.accounts.max_friends + (ov.accounts.admin ? 1 : 0)}</b></div>
     <div class="stat"><span>Active VPN</span><b>${ov.vpn_users}</b></div>
     <div class="stat"><span>Endpoint</span><b style="font-size:13px">${esc(ov.public_endpoint)}</b></div>
   </div>

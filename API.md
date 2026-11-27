@@ -47,6 +47,6 @@ Auth: session cookie `tiktunnel_session` (HttpOnly). All mutating admin requests
 | GET | `/api/monitor/network` | interface counters + TCP connect probes; explicitly not client-side latency |
 | GET | `/api/monitor/performance` | stored metric history |
 
-Errors use `{ok:false,error:<code>}` with 400/401/403/404/409/429. Account creation returns specific codes: `invalid_username`, `invalid_password`, `invalid_quota`, `invalid_expiry`, `username_taken`, `friend_limit_reached`. `GET /health` is public.
+Errors use `{ok:false,error:<code>}` with 400/401/403/404/409/429. A `401 unauthorized` on a write is retried once by the web UI after refreshing the CSRF token from `/api/auth/me`. Account creation returns specific codes: `invalid_username`, `invalid_password`, `invalid_quota`, `invalid_expiry`, `username_taken`, `friend_limit_reached`. `GET /health` is public.
 
 Static assets are served with `Cache-Control: no-store` and a version query (`?v=<package version>`); the UI also has a **Clear cache** button that reloads the current page with a cache-busting query.

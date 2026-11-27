@@ -23,7 +23,7 @@ Each friend logs in with their own username/password and sees only their own dat
 
 - **Copy VLESS URI** — raw URI for manual import.
 - **Copy subscription URL** — `/api/sub/<token>` returns base64 by default, `?raw=1` returns the plain URI.
-- **Add to Shadowrocket** — attempts `shadowrocket://add/<base64(uri)>`; if iOS does not handle it, use manual import below. The same button is available in the Admin dashboard for each account. Total accounts = 3 (Admin + 2 friends).
+- **Add to Shadowrocket** — attempts `shadowrocket://add/<base64(uri)>`; if iOS does not handle it, use manual import below. The same button is available in the Admin dashboard for each account. Total accounts = 4 (Admin + 3 friends).
 
 ## Manual import on iPhone
 

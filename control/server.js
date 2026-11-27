@@ -64,10 +64,19 @@ function setSessionCookie(reply, s) {
     `Max-Age=${Math.max(0, Math.floor((Date.parse(s.expiresAt) - Date.now()) / 1000))}`
   ];
   if (control.cookieSecure) parts.push('Secure');
-  reply.header('Set-Cookie', parts.join('; '));
+  const csrfParts = [
+    `tiktunnel_csrf=${encodeURIComponent(s.csrf)}`,
+    'Path=/', 'SameSite=Strict',
+    `Max-Age=${Math.max(0, Math.floor((Date.parse(s.expiresAt) - Date.now()) / 1000))}`
+  ];
+  if (control.cookieSecure) csrfParts.push('Secure');
+  reply.header('Set-Cookie', [parts.join('; '), csrfParts.join('; ')]);
 }
 function clearSessionCookie(reply) {
-  reply.header('Set-Cookie', 'tiktunnel_session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0');
+  reply.header('Set-Cookie', [
+    'tiktunnel_session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0',
+    'tiktunnel_csrf=; Path=/; SameSite=Strict; Max-Age=0'
+  ]);
 }
 function rateLimited(req, key, limit, windowMs) {
   const k = `${req.ip}|${key}`;
@@ -205,7 +214,7 @@ app.get('/api/admin/overview', async (req, reply) => {
     mode: control.vpn_mode,
     public_endpoint: control.vpn_mode === 'ws' ? `${control.public_https_host}:443` : `${control.publicTcpHost}:${control.publicTcpPort}`,
     server: { sing_box: processAlive(readPid('sing-box.pid')), api: true, ...st },
-    accounts: { friends: cdb.friendCount(), max_friends: 2, admin: cdb.adminExists() },
+    accounts: { friends: cdb.friendCount(), max_friends: envcfg.maxUsers, admin: cdb.adminExists() },
     vpn_users: cdb.activeVpnUsers().length,
     notifications: cdb.db.prepare('SELECT detail FROM audit_logs WHERE action=? ORDER BY id DESC LIMIT 5').all('quota_exhausted').map((x) => x.detail)
   });
@@ -225,7 +234,7 @@ app.get('/api/admin/users/:id', async (req, reply) => {
 
 app.post('/api/admin/users', async (req, reply) => {
   const a = guard(req, reply, 'admin'); if (!a || !csrfOk(req, a)) return reply.code(401).send({ ok: false, error: 'unauthorized' });
-  if (cdb.friendCount() >= 2) return reply.code(409).send({ ok: false, error: 'friend_limit_reached' });
+  if (cdb.friendCount() >= envcfg.maxUsers) return reply.code(409).send({ ok: false, error: 'friend_limit_reached' });
   const b = req.body || {};
   const username = typeof b.username === 'string' ? b.username.trim() : '';
   if (!validUsername(username)) return reply.code(400).send({ ok: false, error: 'invalid_username' });
