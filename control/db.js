@@ -244,6 +244,43 @@ function migrate() {
       db.exec('COMMIT');
     } catch (e) { db.exec('ROLLBACK'); throw e; }
   }
+  if (!applied.has(7)) {
+    db.exec('BEGIN');
+    try {
+      const cols = new Set(db.prepare('PRAGMA table_info(traffic_usage)').all().map((r) => r.name));
+      if (!cols.has('overhead_bytes')) db.exec('ALTER TABLE traffic_usage ADD COLUMN overhead_bytes INTEGER NOT NULL DEFAULT 0');
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS research_runs (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          ts TEXT NOT NULL,
+          branch TEXT NOT NULL DEFAULT 't15kn',
+          target TEXT NOT NULL DEFAULT '',
+          kind TEXT NOT NULL DEFAULT 'probe',
+          status TEXT NOT NULL DEFAULT 'UNKNOWN',
+          hypothesis TEXT NOT NULL DEFAULT '',
+          verdict TEXT NOT NULL DEFAULT 'unverified',
+          detail TEXT NOT NULL DEFAULT '',
+          actor TEXT NOT NULL DEFAULT 'system'
+        );
+        CREATE INDEX IF NOT EXISTS idx_research_runs_id ON research_runs(id DESC);
+        CREATE TABLE IF NOT EXISTS carrier_reports (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          ts TEXT NOT NULL,
+          user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          period_start TEXT NOT NULL,
+          period_end TEXT NOT NULL,
+          carrier_used_bytes INTEGER NOT NULL,
+          server_used_bytes INTEGER NOT NULL,
+          delta_bytes INTEGER NOT NULL,
+          note TEXT NOT NULL DEFAULT '',
+          actor TEXT NOT NULL DEFAULT 'admin'
+        );
+        CREATE INDEX IF NOT EXISTS idx_carrier_user_ts ON carrier_reports(user_id, id DESC);
+      `);
+      db.prepare('INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)').run(7, now());
+      db.exec('COMMIT');
+    } catch (e) { db.exec('ROLLBACK'); throw e; }
+  }
   return applied;
 }
 migrate();
@@ -394,12 +431,12 @@ function revokeFriend(id, actor) {
   } catch (e) { db.exec('ROLLBACK'); throw e; }
 }
 
-function recordTraffic(userId, up, down, source = 'ws-proxy', ts = now()) {
-  if (!up && !down) return;
+function recordTraffic(userId, up, down, source = 'ws-proxy', ts = now(), overhead = 0) {
+  if (!up && !down && !overhead) return;
   db.exec('BEGIN');
   try {
-    db.prepare('INSERT INTO traffic_usage (user_id, ts, upload_bytes, download_bytes, total_bytes, source) VALUES (?, ?, ?, ?, ?, ?)')
-      .run(userId, ts, up, down, up + down, source);
+    db.prepare('INSERT INTO traffic_usage (user_id, ts, upload_bytes, download_bytes, total_bytes, source, overhead_bytes) VALUES (?, ?, ?, ?, ?, ?, ?)')
+      .run(userId, ts, up, down, up + down, source, Math.max(0, overhead));
     db.prepare('UPDATE users SET used_upload=used_upload+?, used_download=used_download+?, last_seen=? WHERE id=?')
       .run(up, down, ts, userId);
     db.exec('COMMIT');
@@ -407,7 +444,64 @@ function recordTraffic(userId, up, down, source = 'ws-proxy', ts = now()) {
 }
 
 function trafficHistory(userId, limit = 100) {
-  return db.prepare('SELECT ts, upload_bytes, download_bytes, total_bytes FROM traffic_usage WHERE user_id=? ORDER BY id DESC LIMIT ?').all(userId, limit);
+  return db.prepare('SELECT ts, upload_bytes, download_bytes, total_bytes, overhead_bytes, source FROM traffic_usage WHERE user_id=? ORDER BY id DESC LIMIT ?').all(userId, limit);
+}
+
+function trafficTotals(userId, sinceIso = null) {
+  const row = sinceIso
+    ? db.prepare('SELECT COALESCE(SUM(upload_bytes),0) AS up, COALESCE(SUM(download_bytes),0) AS down, COALESCE(SUM(overhead_bytes),0) AS overhead FROM traffic_usage WHERE user_id=? AND ts>=?').get(userId, sinceIso)
+    : db.prepare('SELECT COALESCE(SUM(upload_bytes),0) AS up, COALESCE(SUM(download_bytes),0) AS down, COALESCE(SUM(overhead_bytes),0) AS overhead FROM traffic_usage WHERE user_id=?').get(userId);
+  return { up: Number(row.up), down: Number(row.down), overhead: Number(row.overhead), total: Number(row.up) + Number(row.down) };
+}
+
+function trafficSummary(userId, { buckets = 30, sinceIso = null } = {}) {
+  const where = sinceIso ? 'AND ts>=?' : '';
+  const args = sinceIso ? [userId, sinceIso] : [userId];
+  const daily = db.prepare(`SELECT strftime('%Y-%m-%d', ts) AS bucket,
+      COALESCE(SUM(upload_bytes),0) AS up, COALESCE(SUM(download_bytes),0) AS down,
+      COALESCE(SUM(overhead_bytes),0) AS overhead
+    FROM traffic_usage WHERE user_id=? ${where} GROUP BY bucket ORDER BY bucket DESC LIMIT ?`)
+    .all(...args, buckets);
+  const weekly = db.prepare(`SELECT strftime('%Y-W%W', ts) AS bucket,
+      COALESCE(SUM(upload_bytes),0) AS up, COALESCE(SUM(download_bytes),0) AS down
+    FROM traffic_usage WHERE user_id=? ${where} GROUP BY bucket ORDER BY bucket DESC LIMIT ?`)
+    .all(...args, buckets);
+  const monthly = db.prepare(`SELECT strftime('%Y-%m', ts) AS bucket,
+      COALESCE(SUM(upload_bytes),0) AS up, COALESCE(SUM(download_bytes),0) AS down
+    FROM traffic_usage WHERE user_id=? ${where} GROUP BY bucket ORDER BY bucket DESC LIMIT ?`)
+    .all(...args, buckets);
+  const bySource = db.prepare(`SELECT source, COUNT(*) AS records,
+      COALESCE(SUM(upload_bytes),0) AS up, COALESCE(SUM(download_bytes),0) AS down,
+      COALESCE(SUM(overhead_bytes),0) AS overhead
+    FROM traffic_usage WHERE user_id=? ${where} GROUP BY source ORDER BY (COALESCE(SUM(upload_bytes),0)+COALESCE(SUM(download_bytes),0)) DESC`)
+    .all(...args);
+  return { totals: trafficTotals(userId, sinceIso), daily, weekly, monthly, by_source: bySource };
+}
+
+function sessionHistory(userId, limit = 50) {
+  return db.prepare(`SELECT id, ts_start, ts_end, upload_bytes, download_bytes, status, remote, device_id, last_traffic_at
+    FROM connection_sessions WHERE user_id=? ORDER BY id DESC LIMIT ?`).all(Number(userId), limit);
+}
+
+function addResearchRun(r) {
+  return db.prepare(`INSERT INTO research_runs (ts, branch, target, kind, status, hypothesis, verdict, detail, actor)
+    VALUES (?,?,?,?,?,?,?,?,?)`).run(now(), String(r.branch || 't15kn'), String(r.target || ''),
+    String(r.kind || 'probe'), String(r.status || 'UNKNOWN'), String(r.hypothesis || ''),
+    String(r.verdict || 'unverified'), String(r.detail || ''), String(r.actor || 'system')).lastInsertRowid;
+}
+function listResearchRuns(limit = 100) {
+  return db.prepare('SELECT * FROM research_runs ORDER BY id DESC LIMIT ?').all(limit);
+}
+function addCarrierReport(r) {
+  return db.prepare(`INSERT INTO carrier_reports (ts, user_id, period_start, period_end, carrier_used_bytes, server_used_bytes, delta_bytes, note, actor)
+    VALUES (?,?,?,?,?,?,?,?,?)`).run(now(), Number(r.user_id), String(r.period_start), String(r.period_end),
+    Number(r.carrier_used_bytes), Number(r.server_used_bytes), Number(r.delta_bytes), String(r.note || ''), String(r.actor || 'admin')).lastInsertRowid;
+}
+function listCarrierReports(userId = null, limit = 50) {
+  if (userId === null) {
+    return db.prepare(`SELECT c.*, u.username FROM carrier_reports c JOIN users u ON u.id=c.user_id ORDER BY c.id DESC LIMIT ?`).all(limit);
+  }
+  return db.prepare('SELECT * FROM carrier_reports WHERE user_id=? ORDER BY id DESC LIMIT ?').all(Number(userId), limit);
 }
 
 function openSession(userId, role) {
@@ -608,7 +702,9 @@ module.exports = {
   adminExists, createAdmin, seedAdminFromEnv, getAdmin, updateAdminHash,
   friendCount, listUsers, getUser, getUserByUsername, getUserByToken, getVpnClient, getSubscription,
   createFriend, setFriendPassword, changeQuota, setUserState, revokeFriend,
-  recordTraffic, trafficHistory, openSession, getSession, deleteSession, purgeSessions,
+  recordTraffic, trafficHistory, trafficTotals, trafficSummary, sessionHistory,
+  addResearchRun, listResearchRuns, addCarrierReport, listCarrierReports,
+  openSession, getSession, deleteSession, purgeSessions,
   addMetric, metrics, activeVpnUsers, listExperimentalClients, auditLogs,
   validDeviceId, normalizeDeviceMeta, upsertDevice, registerDevice, getDevice, touchDevice, addDeviceTraffic, setDeviceName, listDevices, adminDevices,
   getExperimentalClient, createExperimentalClient, getOrCreateExperimentalUuid, getExperimentalConfig, setExperimentalConfig, getExperimentalEnabled, DEFAULT_EXPERIMENTAL_CONFIG,

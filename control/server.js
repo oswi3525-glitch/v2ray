@@ -9,9 +9,11 @@ const bcrypt = require('bcryptjs');
 const Fastify = require('fastify');
 const { WebSocketServer, WebSocket } = require('ws');
 
+const zlib = require('node:zlib');
 const cdb = require('./db');
 const envcfg = require('../config/runtime');
 const { runDiagnostics } = require('./diagnostics');
+const research = require('./research');
 const { ROOT } = cdb;
 const control = (() => {
   const c = JSON.parse(fs.readFileSync(path.join(ROOT, 'config', 'control.json'), 'utf8'));
@@ -27,6 +29,14 @@ const control = (() => {
   };
 })();
 
+const RESEARCH_TARGETS = [
+  { id: 'tiktok', label: 'TikTok CDN (tiktokv.com)', host: 'tiktokv.com' },
+  { id: 'youtube', label: 'YouTube (www.youtube.com)', host: 'www.youtube.com' },
+  { id: 'apple', label: 'Safari/Apple (www.apple.com)', host: 'www.apple.com' },
+  { id: 'github', label: 'GitHub (github.com)', host: 'github.com' },
+  { id: 'cloudflare', label: 'Cloudflare (cloudflare.com)', host: 'cloudflare.com' }
+];
+
 const app = Fastify({ logger: false, bodyLimit: 16 * 1024, trustProxy: false });
 app.addContentTypeParser('application/octet-stream', { parseAs: 'buffer' }, (_req, body, done) => done(null, body));
 const startedAt = Date.now();
@@ -34,6 +44,7 @@ const apiTimes = [];
 const rateBuckets = new Map();
 const activeWs = new Map();
 const liveTraffic = new Map();
+const lastTrafficSeen = new Map();
 const speedPrev = new Map();
 const deviceLastTraffic = new Map();
 const loginFailures = new Map();
@@ -202,6 +213,73 @@ function experimentalUri(u, deviceId = null) {
   const security = cfg.tls_mode === 'tls' ? 'tls' : 'none';
   return `vless://${uuid}@${address}:${port}?encryption=none&type=tcp&security=${security}&sni=${sni}#${name}`;
 }
+function buildFullTunnelProfile(u, deviceId = null) {
+  const v = cdb.getVpnClient(u.id);
+  const s = cdb.getSubscription(u.id);
+  if (!v || !s) return null;
+  const tcp = control.publicTransport === 'tcp' || control.vpn_mode === 'tcp';
+  const outbound = tcp
+    ? {
+        type: 'vless', tag: 'proxy',
+        server: control.publicTcpHost, server_port: control.publicTcpPort,
+        uuid: v.uuid, flow: '', packet_encoding: 'xudp'
+      }
+    : {
+        type: 'vless', tag: 'proxy',
+        server: control.public_https_host, server_port: 443,
+        uuid: v.uuid, flow: '', packet_encoding: 'xudp',
+        transport: {
+          type: 'ws',
+          path: s.path + (cdb.validDeviceId(deviceId) ? `.${deviceId}` : ''),
+          headers: { Host: control.public_https_host }
+        },
+        tls: { enabled: true, server_name: control.public_https_host }
+      };
+  const config = {
+    log: { level: 'warn', timestamp: true },
+    dns: {
+      servers: [
+        { type: 'https', tag: 'remote-dns', server: '1.1.1.1', detour: 'proxy' },
+        { type: 'local', tag: 'local-dns' }
+      ],
+      final: 'remote-dns'
+    },
+    inbounds: [
+      {
+        type: 'tun', tag: 'tun-in',
+        address: ['172.19.0.1/30', 'fdfe:dcba:9876::1/126'],
+        mtu: 9000,
+        auto_route: true,
+        strict_route: true,
+        stack: 'system'
+      }
+    ],
+    outbounds: [
+      outbound,
+      { type: 'direct', tag: 'direct' },
+      { type: 'block', tag: 'block' }
+    ],
+    route: {
+      rules: [{ protocol: 'dns', action: 'hijack-dns' }],
+      final: 'proxy',
+      auto_detect_interface: true,
+      default_domain_resolver: 'local-dns'
+    }
+  };
+  return {
+    config,
+    meta: {
+      profile: 'tiktunnel-full-tunnel',
+      applies_to: 'sing-box client (desktop/Android/macOS). iOS system VPN still requires a NetworkExtension app or Shadowrocket.',
+      ipv4: 'all IPv4 routed through the VPN outbound',
+      ipv6: 'IPv6 is routed into the tunnel; no outside-tunnel IPv6 route is configured',
+      dns: 'DNS resolved through the tunnel (remote-dns detoured to proxy)',
+      udp: 'UDP forwarded via VLESS xudp; TCP via VLESS',
+      routing_check: 'verify with a public IP echo after connecting; this file does not guarantee carrier-side behaviour'
+    }
+  };
+}
+
 let applyChain = Promise.resolve();
 function applyConfig() {
   applyChain = applyChain.then(() => new Promise((resolve, reject) => {
@@ -228,6 +306,36 @@ app.addHook('onResponse', async (req) => {
   if (!req._t) return;
   apiTimes.push(Number(process.hrtime.bigint() - req._t) / 1e6);
   if (apiTimes.length > 200) apiTimes.shift();
+});
+// Compress JSON metadata/API responses when the client advertises support.
+// This never touches VPN payloads (VLESS traffic does not pass through Fastify)
+// and never re-compresses already-compressed or binary bodies.
+app.addHook('onSend', async (req, reply, payload) => {
+  try {
+    if (req.method === 'HEAD' || reply.statusCode !== 200) return payload;
+    if (!String(reply.getHeader('content-type') || '').includes('application/json')) return payload;
+    if (reply.getHeader('content-encoding')) return payload;
+    const body = Buffer.isBuffer(payload) ? payload : Buffer.from(String(payload));
+    if (body.length < 2048) return payload;
+    const accept = String(req.headers['accept-encoding'] || '');
+    if (/\bbr\b/.test(accept)) {
+      const out = zlib.brotliCompressSync(body, {
+        params: { [zlib.constants.BROTLI_PARAM_QUALITY]: 4, [zlib.constants.BROTLI_PARAM_SIZE_HINT]: body.length }
+      });
+      reply.header('Content-Encoding', 'br');
+      reply.header('Vary', 'Accept-Encoding');
+      reply.header('Content-Length', out.length);
+      return out;
+    }
+    if (/\bgzip\b/.test(accept)) {
+      const out = zlib.gzipSync(body, { level: 6 });
+      reply.header('Content-Encoding', 'gzip');
+      reply.header('Vary', 'Accept-Encoding');
+      reply.header('Content-Length', out.length);
+      return out;
+    }
+  } catch {}
+  return payload;
 });
 app.setErrorHandler((err, _req, reply) => reply.code(400).send({ ok: false, error: 'bad_request' }));
 
@@ -487,6 +595,102 @@ app.get('/api/admin/security', async (req, reply) => {
       login_lockout: '5 failures / 15 min', rate_limit: '180 req/min/api' } });
 });
 
+// ---- Research Lab (real measurements only) ----
+app.get('/api/admin/research/hypotheses', async (req, reply) => {
+  if (!guard(req, reply, 'admin')) return;
+  return reply.send({ ok: true, hypotheses: research.listHypotheses(),
+    targets: RESEARCH_TARGETS,
+    policy: 'Server-observed probes only. No application-identity spoofing, traffic faking or carrier billing evasion.' });
+});
+app.post('/api/admin/research/run', async (req, reply) => {
+  const a = guard(req, reply, 'admin'); if (!a || !csrfOk(req, a)) return reply.code(401).send({ ok: false, error: 'unauthorized' });
+  if (rateLimited(req, 'research_run', 5, 60000)) return reply.code(429).send({ ok: false, error: 'rate_limited' });
+  const requested = Array.isArray(req.body?.targets) ? req.body.targets : RESEARCH_TARGETS.map((t) => t.id);
+  const picked = RESEARCH_TARGETS.filter((t) => requested.includes(t.id));
+  if (!picked.length) return reply.code(400).send({ ok: false, error: 'no_valid_targets' });
+  const samples = Math.min(8, Math.max(3, Number.parseInt(req.body?.samples, 10) || 4));
+  const results = [];
+  for (const t of picked) {
+    const r = await research.probeTarget(t.host, 443, { samples, tlsCheck: true, path: '/' });
+    const id = cdb.addResearchRun({
+      branch: 't15kn', target: t.host, kind: 'reachability', status: r.verdict,
+      hypothesis: '', verdict: 'observed',
+      detail: JSON.stringify({ tcp: r.tcp, tls: r.tls, http: r.http, dns: r.dns }),
+      actor: 'admin'
+    });
+    results.push({ id, label: t.label, ...r });
+  }
+  cdb.securityEvent('admin', 'research_run', picked.map((t) => t.id).join(','), req.ip, `targets=${picked.length}`);
+  return reply.header('Cache-Control', 'no-store').send({
+    ok: true, branch: 't15kn', samples,
+    results,
+    note: 'Reachability is measured from the server. It does not prove how Viettel classifies or bills T15KN traffic.'
+  });
+});
+app.get('/api/admin/research/runs', async (req, reply) => {
+  if (!guard(req, reply, 'admin')) return;
+  const limit = Math.min(200, Math.max(1, Number.parseInt(req.query.limit, 10) || 50));
+  return reply.send({ ok: true, runs: cdb.listResearchRuns(limit), hypotheses: research.listHypotheses() });
+});
+app.post('/api/admin/research/carrier', async (req, reply) => {
+  const a = guard(req, reply, 'admin'); if (!a || !csrfOk(req, a)) return reply.code(401).send({ ok: false, error: 'unauthorized' });
+  const b = req.body || {};
+  const u = cdb.getUser(Number(b.user_id));
+  if (!u) return reply.code(404).send({ ok: false, error: 'not_found' });
+  const start = Date.parse(b.period_start);
+  const end = Date.parse(b.period_end);
+  const carrier = Number(b.carrier_used_bytes);
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return reply.code(400).send({ ok: false, error: 'invalid_period' });
+  if (!Number.isFinite(carrier) || carrier < 0) return reply.code(400).send({ ok: false, error: 'invalid_carrier_bytes' });
+  const startIso = new Date(start).toISOString();
+  const endIso = new Date(end).toISOString();
+  const row = cdb.db.prepare('SELECT COALESCE(SUM(upload_bytes),0) AS up, COALESCE(SUM(download_bytes),0) AS down FROM traffic_usage WHERE user_id=? AND ts>=? AND ts<=?')
+    .get(u.id, startIso, endIso);
+  const serverUsed = Number(row.up) + Number(row.down);
+  const delta = carrier - serverUsed;
+  const denominator = Math.max(carrier, serverUsed, 1);
+  const mismatchPct = +((Math.abs(delta) / denominator) * 100).toFixed(2);
+  const id = cdb.addCarrierReport({
+    user_id: u.id, period_start: startIso, period_end: endIso,
+    carrier_used_bytes: Math.round(carrier), server_used_bytes: serverUsed,
+    delta_bytes: Math.round(delta), note: String(b.note || '').slice(0, 300), actor: 'admin'
+  });
+  cdb.addResearchRun({
+    branch: 't15kn', target: u.username, kind: 'carrier_reconciliation', status: mismatchPct > 10 ? 'MISMATCH' : 'CONSISTENT',
+    hypothesis: 't15kn_non_tiktok_billed', verdict: mismatchPct > 10 ? 'testing' : 'unverified',
+    detail: JSON.stringify({ carrier_used_bytes: Math.round(carrier), server_used_bytes: serverUsed, delta: Math.round(delta), mismatch_pct: mismatchPct }),
+    actor: 'admin'
+  });
+  cdb.securityEvent('admin', 'carrier_report_added', String(u.id), req.ip, `delta=${Math.round(delta)}`);
+  return reply.code(201).send({
+    ok: true,
+    id,
+    user_id: u.id,
+    carrier_used_bytes: Math.round(carrier),
+    server_used_bytes: serverUsed,
+    delta_bytes: Math.round(delta),
+    mismatch_pct: mismatchPct,
+    mismatch: mismatchPct > 10,
+    note: 'The carrier figure is authoritative. Differences can come from free-rated traffic, tunnel overhead, clock skew or different billing windows.'
+  });
+});
+app.get('/api/admin/research/carrier', async (req, reply) => {
+  if (!guard(req, reply, 'admin')) return;
+  return reply.send({ ok: true, reports: cdb.listCarrierReports(null, 100),
+    note: 'Carrier figures are manually entered from Viettel usage screens; they are not fetched from Viettel APIs.' });
+});
+app.get('/api/friend/research', async (req, reply) => {
+  const a = guard(req, reply, 'friend'); if (!a) return;
+  return reply.send({
+    ok: true,
+    branch: 't15kn',
+    hypotheses: research.listHypotheses(),
+    recent_runs: cdb.listResearchRuns(20).map((r) => ({ ts: r.ts, branch: r.branch, target: r.target, kind: r.kind, status: r.status, verdict: r.verdict })),
+    carrier_reports: cdb.listCarrierReports(a.user.id, 20),
+    note: 'Read-only research view. Run probes from the admin Research Lab.'
+  });
+});
+
 app.get('/api/friend/me', async (req, reply) => {
   const a = guard(req, reply, 'friend'); if (!a) return;
   return reply.send({ ok: true, user: publicSelf(cdb.getUser(a.user.id) || a.user) });
@@ -494,6 +698,57 @@ app.get('/api/friend/me', async (req, reply) => {
 app.get('/api/friend/usage', async (req, reply) => {
   const a = guard(req, reply, 'friend'); if (!a) return;
   return reply.send({ ok: true, usage: publicSelf(cdb.getUser(a.user.id) || a.user), history: cdb.trafficHistory(a.user.id, 100) });
+});
+app.get('/api/friend/usage/summary', async (req, reply) => {
+  const a = guard(req, reply, 'friend'); if (!a) return;
+  const days = Math.min(365, Math.max(1, Number.parseInt(req.query.days, 10) || 30));
+  const since = new Date(Date.now() - days * 86400e3).toISOString();
+  const u = cdb.getUser(a.user.id) || a.user;
+  return reply.header('Cache-Control', 'no-store').send({
+    ok: true,
+    scope: 'server-observed VPN interface bytes; not a carrier bill',
+    quota_bytes: u.quota_bytes,
+    used_upload: u.used_upload,
+    used_download: u.used_download,
+    ...cdb.trafficSummary(u.id, { buckets: days, sinceIso: since }),
+    sessions: cdb.sessionHistory(u.id, 20)
+  });
+});
+app.get('/api/friend/sessions', async (req, reply) => {
+  const a = guard(req, reply, 'friend'); if (!a) return;
+  return reply.send({ ok: true, sessions: cdb.sessionHistory(a.user.id, 50) });
+});
+app.get('/api/admin/users/:id/usage/summary', async (req, reply) => {
+  if (!guard(req, reply, 'admin')) return;
+  const u = cdb.getUser(Number(req.params.id));
+  if (!u) return reply.code(404).send({ ok: false, error: 'not_found' });
+  const days = Math.min(365, Math.max(1, Number.parseInt(req.query.days, 10) || 30));
+  const since = new Date(Date.now() - days * 86400e3).toISOString();
+  return reply.header('Cache-Control', 'no-store').send({
+    ok: true,
+    scope: 'server-observed VPN interface bytes; not a carrier bill',
+    user: publicUser(u),
+    ...cdb.trafficSummary(u.id, { buckets: days, sinceIso: since }),
+    sessions: cdb.sessionHistory(u.id, 50)
+  });
+});
+app.get('/api/friend/profile', async (req, reply) => {
+  const a = guard(req, reply, 'friend'); if (!a) return;
+  const u = cdb.getUser(a.user.id) || a.user;
+  if (!accountReady(u)) return reply.code(403).send({ ok: false, error: 'account_not_ready' });
+  const profile = buildFullTunnelProfile(u, req.query.device);
+  if (!profile) return reply.code(409).send({ ok: false, error: 'config_not_ready' });
+  return reply.header('Cache-Control', 'no-store').send({ ok: true, ...profile });
+});
+app.get('/api/sub/:token/profile', async (req, reply) => {
+  if (!/^[A-Za-z0-9_-]{8,128}$/.test(req.params.token)) return reply.code(400).send({ ok: false, error: 'invalid_token' });
+  const u = cdb.getUserByToken(req.params.token);
+  if (!u || !accountReady(u)) return reply.code(404).send({ ok: false, error: 'not_found' });
+  const profile = buildFullTunnelProfile(u, req.query.device);
+  if (!profile) return reply.code(404).send({ ok: false, error: 'not_found' });
+  reply.header('Cache-Control', 'no-store');
+  reply.header('Content-Disposition', `attachment; filename="tiktunnel-fulltunnel-${String(u.username).replace(/[^A-Za-z0-9_.-]/g, '_')}.json"`);
+  return reply.send(profile.config);
 });
 app.get('/api/friend/vpn', async (req, reply) => {
   const a = guard(req, reply, 'friend'); if (!a) return;
@@ -1068,6 +1323,7 @@ function bumpLiveTraffic(userId, up, down) {
   cur.up += up;
   cur.down += down;
   liveTraffic.set(userId, cur);
+  if (up + down > 0) lastTrafficSeen.set(userId, Date.now());
 }
 function liveStats(user) {
   const live = liveTraffic.get(user.id) || { up: 0, down: 0 };
@@ -1084,8 +1340,14 @@ function liveStats(user) {
     }
   }
   speedPrev.set(user.id, { t: now, up: live.up, down: live.down });
+  const wsLast = lastTrafficSeen.get(user.id) || 0;
+  const dbLast = user.last_seen ? Date.parse(user.last_seen) : 0;
+  const lastData = Math.max(wsLast, Number.isFinite(dbLast) ? dbLast : 0);
+  const active = lastData > 0 && now - lastData <= 60000;
   return {
-    active: activeWs.has(user.id),
+    active,
+    tunnel_open: activeWs.has(user.id),
+    last_traffic_at: lastData > 0 ? new Date(lastData).toISOString() : null,
     up_bps: Math.round(upBps),
     down_bps: Math.round(downBps),
     total_bps: Math.round(upBps + downBps),

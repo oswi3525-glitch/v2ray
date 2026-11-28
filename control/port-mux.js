@@ -18,19 +18,34 @@ let connections = 0;
 let httpCount = 0;
 let vlessCount = 0;
 let unknownCount = 0;
+let lastReload = 0;
 const userByUuid = new Map();
 
 function reloadUsers() {
-  userByUuid.clear();
+  lastReload = Date.now();
+  const next = new Map();
   try {
     for (const r of cdb.db.prepare(`SELECT v.uuid, u.id FROM vpn_clients v
       JOIN users u ON u.id=v.user_id WHERE u.revoked_at IS NULL`).all()) {
-      userByUuid.set(String(r.uuid).replace(/-/g, ''), Number(r.id));
+      next.set(String(r.uuid).replace(/-/g, ''), Number(r.id));
     }
+    userByUuid.clear();
+    for (const [k, v] of next) userByUuid.set(k, v);
   } catch (e) { process.stderr.write(`port-mux user reload failed: ${e.message}\n`); }
 }
+
+function lookupUser(uuidHex) {
+  let userId = userByUuid.get(uuidHex) || null;
+  if (userId) return userId;
+  // Accounts can be created/rotated after the periodic reload; refresh on a miss
+  // (throttled so unauthenticated UUID floods cannot hammer SQLite).
+  if (Date.now() - lastReload > 250) reloadUsers();
+  userId = userByUuid.get(uuidHex) || null;
+  return userId;
+}
+
 reloadUsers();
-setInterval(reloadUsers, 30000).unref();
+setInterval(reloadUsers, 5000).unref();
 
 function vlessHeaderLength(head) {
   const addons = head[17];
@@ -52,7 +67,7 @@ function classify(head) {
     return { kind: 'http', first: head };
   }
   if (head.length < 18) return null;
-  const userId = userByUuid.get(head.subarray(1, 17).toString('hex')) || null;
+  const userId = lookupUser(head.subarray(1, 17).toString('hex'));
   if (!userId) return { kind: 'unknown', first: head };
   const hlen = vlessHeaderLength(head);
   return { kind: 'vless', first: head, userId, headerBytes: hlen > 0 && hlen <= head.length ? hlen : 0 };
@@ -64,16 +79,20 @@ function pipe(client, decision) {
   let stats = null;
   if (userId && first && first.length > headerBytes) {
     const initialUp = first.length - headerBytes;
-    stats = { up: initialUp, down: 0, flushedUp: 0, flushedDown: 0, flushed: false };
+    stats = { up: initialUp, down: 0, flushedUp: 0, flushedDown: 0, overhead: headerBytes, flushedOverhead: 0, flushed: false };
   }
   const flush = () => {
     if (!stats || stats.flushed) return;
     const du = stats.up - stats.flushedUp;
     const dd = stats.down - stats.flushedDown;
-    if (du > 0 || dd > 0) {
-      try { cdb.recordTraffic(userId, du, dd, 'vless-tcp-mux'); } catch {}
-      stats.flushedUp = stats.up;
-      stats.flushedDown = stats.down;
+    const dov = stats.overhead - stats.flushedOverhead;
+    if (du > 0 || dd > 0 || dov > 0) {
+      try {
+        cdb.recordTraffic(userId, du, dd, 'vless-tcp-mux', undefined, dov);
+        stats.flushedUp = stats.up;
+        stats.flushedDown = stats.down;
+        stats.flushedOverhead = stats.overhead;
+      } catch {}
     }
   };
   const flushTimer = stats ? setInterval(flush, FLUSH_MS) : null;

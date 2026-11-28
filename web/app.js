@@ -296,7 +296,7 @@ async function friendView() {
     const pct = q > 0 ? Math.min(100, l.used_bytes / q * 100) : 0;
     return { html: `<div class="card hero"><div><span class="sub">Xin chào,</span><h2>${esc(u.user.display_name)}</h2>
       <p class="sub">${u.user.enabled && !u.user.exhausted ? 'Tài khoản hoạt động' : 'Tài khoản tạm ngưng'}</p></div>
-      <span class="pill ${l.active ? 'ok' : ''}" id="ov-status">${l.active ? 'Đang kết nối' : 'Không có kết nối'}</span></div>
+      <span class="pill ${l.active ? 'ok' : l.tunnel_open ? 'warn' : ''}" id="ov-status">${l.active ? 'Đang truyền dữ liệu' : l.tunnel_open ? 'Đã mở tunnel, chưa có traffic' : 'Không có lưu lượng VPN'}</span></div>
       <div class="card"><div class="live-head"><h2>Dung lượng</h2><span class="sub">${q > 0 ? 'Có giới hạn' : 'Không giới hạn'}</span></div>
       <div class="quota-line"><span>Đã dùng <b id="ov-used">${gb(l.used_bytes)}</b></span><span class="sub">/ ${q > 0 ? gb(q) : '∞'}</span></div>
       <div class="progress"><div class="progress-fill ${pct >= 90 ? 'danger' : pct >= 75 ? 'warn' : ''}" style="width:${pct}%"></div></div>
@@ -323,9 +323,23 @@ async function friendView() {
   }
 
   async function dataUsage() {
-    const [u, h] = await Promise.all([api('/api/friend/usage'), api('/api/friend/speedtests?limit=10')]);
+    const [u, h, s] = await Promise.all([api('/api/friend/usage'), api('/api/friend/speedtests?limit=10'), api('/api/friend/usage/summary?days=30')]);
     const pts = [...h.tests].reverse();
-    return { html: `<div class="card"><h2>Lưu lượng theo thời gian</h2>
+    const t = s.totals || { up: 0, down: 0, overhead: 0, total: 0 };
+    const srcRows = (s.by_source || []).map(x => `<tr><td class="mono">${esc(x.source)}</td><td>${gb(x.up)}</td><td>${gb(x.down)}</td><td>${gb(x.overhead || 0)}</td></tr>`).join('');
+    return { html: `<div class="card"><h2>Dung lượng thực đo (30 ngày)</h2>
+      <div class="live-grid six">
+        <div class="live-item"><span>Tổng</span><b>${gb(t.total)}</b></div>
+        <div class="live-item"><span>Upload</span><b>${gb(t.up)}</b></div>
+        <div class="live-item"><span>Download</span><b>${gb(t.down)}</b></div>
+        <div class="live-item"><span>Overhead tunnel</span><b>${gb(t.overhead)}</b></div>
+        <div class="live-item"><span>Phiên gần nhất</span><b>${(s.sessions || []).length}</b></div>
+        <div class="live-item"><span>Quota</span><b>${Number(s.quota_bytes || 0) > 0 ? gb(s.quota_bytes) : '∞'}</b></div>
+      </div>
+      <p class="sub">${esc(s.scope || '')}. Đây là byte quan sát tại VPN interface, không phải hoá đơn Viettel.</p>
+      ${srcRows ? `<div class="scroll" style="margin-top:10px"><table><thead><tr><th>Nguồn</th><th>Upload</th><th>Download</th><th>Overhead</th></tr></thead><tbody>${srcRows}</tbody></table></div>` : ''}
+      <p class="sub">Data qua tunnel và direct được tách theo nguồn ở trên; direct không đi qua VPN không được tính vào quota.</p></div>
+      <div class="card"><h2>Lưu lượng theo thời gian</h2>
       ${pts.length ? '<canvas id="usage-chart" height="120"></canvas>' : emptyState('Chưa có bài test nào', 'Chạy Network Test để có dữ liệu')}</div>
       <div class="card"><h2>Lịch sử đo tốc độ</h2>${pts.length ? `<div class="scroll"><table><thead><tr><th>Thời gian</th><th>Chế độ</th><th>Ping</th><th>Down</th><th>Up</th><th>Dùng</th></tr></thead><tbody>
       ${pts.map(t => `<tr><td class="mono">${esc(t.ts.slice(5, 16))}</td><td>${esc(t.mode)}${t.verified ? '' : ' <span class="pill warn">chưa xác minh</span>'}</td>
@@ -606,8 +620,60 @@ async function friendView() {
       } };
   }
 
-  const friendBuilders = { 'Overview': overview, 'Data Usage': dataUsage, 'Network Test': networkTest,
-    'Diagnostics': diagnosticsTab, 'Devices': devices, 'Shadowrocket': shadowrocket, 'Experimental': experimental, 'Settings': settings };
+  async function routing() {
+    let p;
+    try { p = await api(`/api/friend/profile?device=${dev}`); } catch (e) { p = { ok: false, error: e.message }; }
+    const m = (p && p.meta) || {};
+    return { html: `<div class="card"><h2>Application Routing <span class="pill ok">Full Tunnel</span></h2>
+      <p class="sub">Cấu hình full-tunnel bên dưới đưa <b>toàn bộ IPv4 và IPv6</b> vào tunnel, DNS đi qua proxy. Đây là cấu hình cho sing-box client; iOS system VPN vẫn cần NetworkExtension app hoặc Shadowrocket.</p>
+      <div class="live-grid six">
+        <div class="live-item"><span>IPv4</span><b style="font-size:12px">${esc(m.ipv4 || '—')}</b></div>
+        <div class="live-item"><span>IPv6</span><b style="font-size:12px">${esc(m.ipv6 || '—')}</b></div>
+        <div class="live-item"><span>DNS</span><b style="font-size:12px">${esc(m.dns || '—')}</b></div>
+        <div class="live-item"><span>UDP</span><b style="font-size:12px">${esc(m.udp || '—')}</b></div>
+      </div>
+      <p class="sub warn-note">${esc(m.routing_check || '')}</p>
+      ${p.ok ? `<div class="row"><button id="dl-profile">Tải full-tunnel profile (.json)</button>
+        <button class="ghost" id="copy-profile">Copy JSON</button></div>
+        <details class="adv"><summary>Phân biệt chế độ</summary>
+          <p class="sub"><b>Full Tunnel:</b> route final = proxy, mọi IP vào tunnel.</p>
+          <p class="sub"><b>Split Tunnel:</b> chỉ một số prefix qua proxy, phần còn lại direct (không dùng trong profile này).</p>
+          <p class="sub"><b>Direct:</b> lưu lượng không đi qua VPN. <b>Tunnel:</b> lưu lượng đi qua VPN outbound.</p>
+          <p class="sub">Không quảng cáo "100%": iOS có lưu lượng hệ thống bắt buộc nằm ngoài tunnel tuỳ phiên bản.</p>
+        </details>
+        <p class="sub mono" id="profile-json"></p>` : errorState(p.error)}</div>`,
+      after: () => {
+        if (!p.ok) return;
+        const json = JSON.stringify(p.config, null, 2);
+        document.getElementById('dl-profile').onclick = () => {
+          const blob = new Blob([json], { type: 'application/json' });
+          const a = document.createElement('a');
+          a.href = URL.createObjectURL(blob); a.download = 'tiktunnel-fulltunnel.json'; a.click();
+          setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+        };
+        document.getElementById('copy-profile').onclick = () => copy(json);
+      } };
+  }
+
+  async function researchTab() {
+    let d;
+    try { d = await api('/api/friend/research'); } catch (e) { d = { ok: false, error: e.message }; }
+    const hpill = (s) => `<span class="pill ${s === 'evidence' ? 'ok' : s === 'refuted' ? 'bad' : s === 'testing' ? 'warn' : ''}">${esc(s)}</span>`;
+    const hp = (d.hypotheses || []).map(h => `<div class="diag-item"><div class="diag-head">${hpill(h.status)}<b>${esc(h.id)}</b></div>
+      <p class="sub">${esc(h.statement)}</p><p class="sub">Bằng chứng: ${esc(h.evidence)}</p></div>`).join('');
+    const cr = (d.carrier_reports || []).map(r => `<tr><td class="mono">${esc(r.ts.slice(5, 16))}</td><td>${gb(r.carrier_used_bytes)}</td><td>${gb(r.server_used_bytes)}</td><td>${gb(r.delta_bytes)}</td></tr>`).join('');
+    return { html: `<div class="card"><h2>Research Lab — T15KN <span class="pill warn">Beta</span></h2>
+      <p class="sub">${esc(d.note || '')}</p>
+      <p class="sub warn-note">Không giả mạo TikTok, không né cước. Chỉ hiểu cách nhà mạng phân loại lưu lượng.</p>
+      <div class="diag-list">${hp || emptyState('Chưa có giả thuyết')}</div></div>
+      <div class="card"><h2>Đối chiếu data với nhà mạng</h2>
+      ${cr ? `<div class="scroll"><table><thead><tr><th>Thời điểm</th><th>Nhà mạng</th><th>Server đo</th><th>Lệch</th></tr></thead><tbody>${cr}</tbody></table></div>`
+        : emptyState('Chưa có đối chiếu', 'Admin nhập số liệu từ màn hình sử dụng Viettel')}
+      <p class="sub">Số liệu nhà mạng là nguồn chuẩn; chênh lệch có thể do miễn cước, overhead, lệch giờ hoặc cửa sổ tính cước.</p></div>` };
+  }
+
+  const friendBuilders = { 'Overview': overview, 'Data Usage': dataUsage, 'Routing': routing, 'Network Test': networkTest,
+    'Diagnostics': diagnosticsTab, 'Devices': devices, 'Research': researchTab, 'Shadowrocket': shadowrocket, 'Experimental': experimental, 'Settings': settings };
   mount('Account', friendBuilders, 'Overview');
 }
 
@@ -777,8 +843,65 @@ async function adminView() {
           toast('Đã đổi mật khẩu admin'); document.getElementById('apw').value = ''; } catch (err) { toast(err.message); }
       } };
   }
+  async function researchAdmin() {
+    const [d, c] = await Promise.all([api('/api/admin/research/hypotheses'), api('/api/admin/research/carrier')]);
+    const hpill = (s) => `<span class="pill ${s === 'evidence' ? 'ok' : s === 'refuted' ? 'bad' : s === 'testing' ? 'warn' : ''}">${esc(s)}</span>`;
+    const hp = d.hypotheses.map(h => `<div class="diag-item"><div class="diag-head">${hpill(h.status)}<b>${esc(h.id)}</b></div>
+      <p class="sub">${esc(h.statement)}</p><p class="sub">${esc(h.evidence)}</p></div>`).join('');
+    const targets = d.targets.map(t => `<label class="sub" style="display:inline-block;margin-right:12px"><input type="checkbox" class="rtarget" value="${esc(t.id)}" checked> ${esc(t.label)}</label>`).join('');
+    const reports = c.reports.map(r => `<tr><td class="mono">${esc(r.ts.slice(5, 16))}</td><td>${esc(r.username)}</td><td>${gb(r.carrier_used_bytes)}</td><td>${gb(r.server_used_bytes)}</td><td>${gb(r.delta_bytes)}</td></tr>`).join('');
+    return { html: `<div class="card"><h2>Research Lab — T15KN <span class="pill warn">Beta</span></h2>
+      <p class="sub">${esc(d.policy)}</p>
+      <div class="diag-list">${hp}</div></div>
+      <div class="card"><h2>Run reachability probes</h2>
+      <p class="sub">Đo thật DNS/TCP/TLS/HTTP từ máy chủ tới các đích. Kết quả không chứng minh cách Viettel tính cước.</p>
+      <div>${targets}</div>
+      <div class="row" style="margin-top:12px"><button id="res-run">Chạy probe</button><span class="sub" id="res-status"></span></div>
+      <div id="res-out"></div></div>
+      <div class="card"><h2>Đối chiếu data nhà mạng</h2>
+      <form id="carrier-form"><div class="row">
+        <div style="flex:1"><label>User ID</label><input id="c-id" type="number" min="1" required></div>
+        <div style="flex:1"><label>Carrier used (GB)</label><input id="c-gb" type="number" min="0" step="any" required></div></div>
+        <div class="row"><div style="flex:1"><label>Period start</label><input id="c-start" type="datetime-local" required></div>
+        <div style="flex:1"><label>Period end</label><input id="c-end" type="datetime-local" required></div></div>
+        <label>Note</label><input id="c-note" placeholder="Nguồn: màn hình sử dụng Viettel">
+        <button style="margin-top:12px" type="submit">Lưu đối chiếu</button></form>
+      <div class="scroll" style="margin-top:12px">${reports ? `<table><thead><tr><th>Thời điểm</th><th>User</th><th>Nhà mạng</th><th>Server</th><th>Lệch</th></tr></thead><tbody>${reports}</tbody></table>` : emptyState('Chưa có đối chiếu')}</div>
+      <p class="sub">${esc(c.note)}</p></div>`,
+      after: () => {
+        document.getElementById('res-run').onclick = async () => {
+          const targets = [...document.querySelectorAll('.rtarget')].filter(x => x.checked).map(x => x.value);
+          if (!targets.length) { toast('Chọn ít nhất một đích'); return; }
+          const btn = document.getElementById('res-run'); btn.disabled = true;
+          document.getElementById('res-status').textContent = 'Đang đo…';
+          try {
+            const r = await api('/api/admin/research/run', { method: 'POST', body: JSON.stringify({ targets, samples: 4 }) });
+            document.getElementById('res-out').innerHTML = r.results.map(x => `<div class="diag-item"><div class="diag-head">
+              <span class="pill ${x.verdict === 'REACHABLE' ? 'ok' : 'bad'}">${esc(x.verdict)}</span><b>${esc(x.label)}</b></div>
+              <p class="sub">DNS ${esc((x.dns.addresses || []).join(', ') || x.dns.status)} · TCP avg ${x.tcp.stats.avg ?? '—'} ms · loss ${x.tcp.loss_pct ?? '—'}% · HTTP ${esc(x.http.status_code || x.http.status)}</p></div>`).join('');
+            document.getElementById('res-status').textContent = `Xong ${r.results.length} đích (đã lưu)`;
+          } catch (e) { document.getElementById('res-status').textContent = 'Lỗi: ' + e.message; }
+          btn.disabled = false;
+        };
+        document.getElementById('carrier-form').onsubmit = async (e) => {
+          e.preventDefault();
+          const start = new Date(document.getElementById('c-start').value);
+          const end = new Date(document.getElementById('c-end').value);
+          try {
+            const r = await api('/api/admin/research/carrier', { method: 'POST', body: JSON.stringify({
+              user_id: Number(document.getElementById('c-id').value),
+              period_start: start.toISOString(), period_end: end.toISOString(),
+              carrier_used_bytes: Math.round(Number(document.getElementById('c-gb').value) * 1e9),
+              note: document.getElementById('c-note').value }) });
+            toast(`Đã lưu: lệch ${r.mismatch_pct}%${r.mismatch ? ' (cần kiểm tra)' : ''}`);
+            mount('Admin', adminBuilders, 'Research');
+          } catch (err) { toast(err.message); }
+        };
+      } };
+  }
+
   const adminBuilders = { 'Overview': overview, 'Users': users, 'Quota': quota, 'Devices': devices,
-    'Monitoring': monitoring, 'Network': network, 'Diagnostics': diagnosticsTab, 'Security': security, 'Experimental': experimentalAdmin, 'Settings': settings };
+    'Monitoring': monitoring, 'Network': network, 'Diagnostics': diagnosticsTab, 'Research': researchAdmin, 'Security': security, 'Experimental': experimentalAdmin, 'Settings': settings };
   mount('Admin', adminBuilders, 'Overview');
 }
 

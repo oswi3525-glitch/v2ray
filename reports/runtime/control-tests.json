@@ -10,14 +10,14 @@
     "detail": ""
   },
   {
-    "name": "friend limit enforced (max 2)",
+    "name": "friend limit enforced (max 3)",
     "status": "PASS",
     "detail": ""
   },
   {
-    "name": "2 friends exist",
+    "name": "3 friends exist",
     "status": "PASS",
-    "detail": "2"
+    "detail": "3"
   },
   {
     "name": "UUIDs unique",
@@ -25,12 +25,17 @@
     "detail": ""
   },
   {
-    "name": "password set for tiktunnel-user-01",
+    "name": "password set for friend1",
     "status": "PASS",
     "detail": ""
   },
   {
-    "name": "password set for tiktunnel-user-02",
+    "name": "password set for friend2",
+    "status": "PASS",
+    "detail": ""
+  },
+  {
+    "name": "password set for friend3",
     "status": "PASS",
     "detail": ""
   },

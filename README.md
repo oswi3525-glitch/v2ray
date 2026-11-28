@@ -47,6 +47,10 @@ Startup command cho Pterodactyl/Cloudcode xem `INSTALL.md`.
 - **Devices:** định danh bằng `<subscription-token>.<device-id>` trong WS path; web đăng ký `platform/kind/agent_hash` (không lưu UA thô), Active/Idle/Offline/Unknown tính từ traffic thật.
 - **Speed test:** 10 ping bỏ mẫu lạnh, jitter theo mẫu liên tiếp, 5 chunk đo sau chunk khởi động lấy median, đối chiếu `X-Payload-Bytes`; ≤8 MB/lần tải, ≤2 MB/lần gửi, lịch sử tối đa 100 bản ghi/user.
 - **tiktokv.com:** probe thật DNS/TCP/TLS/HTTP trong Diagnostics và trang kiểm tra gói cước (`npm run test:tiktok`).
+- **Full Tunnel profile:** `GET /api/friend/profile` (session) và `GET /api/sub/:token/profile` (token) trả cấu hình sing-box full-tunnel đã được kiểm tra bằng `sing-box check`: route final = proxy, tun IPv4+IPv6, DNS qua tunnel, UDP xudp. Không phải VPN hệ thống iOS — iOS cần NetworkExtension app hoặc Shadowrocket.
+- **Usage summary:** `/api/friend/usage/summary` tách upload/download/overhead theo nguồn và theo ngày/tuần/tháng. Nhãn rõ "server-observed, not a carrier bill".
+- **Research Lab:** `control/research.js` + `/api/admin/research/*`, giả thuyết T15KN có trạng thái bằng chứng (`unverified|testing|evidence|refuted`), đối chiếu số liệu nhà mạng nhập tay và phát hiện lệch >10%. Không giả mạo TikTok/không né cước.
+- **Metadata compression:** JSON API ≥2 KB trả brotli/gzip khi client hỗ trợ; không đụng payload VPN.
 
 ## API
 
@@ -55,7 +59,9 @@ Xem `API.md`. Tóm tắt: `/api/auth/*`, `/api/admin/*`, `/api/friend/*`, `/api/
 ## Test
 
 ```bash
-npm test                              # E2E 38 checks
+npm test                              # E2E 39 checks
+npm run test:core                     # 22 checks: full-tunnel profile, usage, research, compression
+npm run test:all                      # chạy cả hai suite
 npm run test:tiktok                   # probe thật DNS/TCP/TLS/HTTP tới tiktokv.com
 node tests/device-activity-test.js    # Active → Idle → Offline (~70s)
 node tests/network-benchmark.js       # benchmark thật, ghi reports/runtime/

@@ -35,9 +35,32 @@ Port public duy nhất là 23952; mux chuyển HTTP tới Fastify và byte VLESS
 - Device id chỉ dùng được trên đường WS (nằm trong path); VLESS TCP không mang device id. Xem `CONNECTIVITY_AUDIT.md`.
 - `vpn_mode: tcp` chỉ dùng khi provider có raw TCP thật.
 
+## Full Tunnel client profile
+
+`buildFullTunnelProfile()` in `control/server.js` generates a sing-box client config
+validated with the bundled `sing-box check`:
+
+- `tun` inbound with IPv4 `172.19.0.1/30` and IPv6 `fdfe:dcba:9876::1/126`.
+- `route.final = proxy` + `auto_detect_interface` (default route through VPN).
+- DNS over HTTPS with `detour: proxy` and `default_domain_resolver` for bootstrap.
+- UDP via VLESS `xudp`; TCP via VLESS.
+- Exported by `GET /api/friend/profile` and `GET /api/sub/:token/profile`.
+
+This is a client profile, not an iOS system VPN. A true iOS tunnel requires a
+NetworkExtension target with the Packet Tunnel entitlement (not in this repo).
+
+## Research & accounting
+
+- `control/research.js` performs real DNS/TCP/TLS/HTTP probes and stores results in
+  `research_runs`; T15KN hypotheses carry explicit evidence states.
+- `carrier_reports` stores manually entered Viettel usage and the server-observed
+  bytes over the same window, with delta and >10 % mismatch detection.
+- `traffic_usage.overhead_bytes` separates VLESS request-header overhead from payload.
+- `trafficSummary()` aggregates by day/week/month and by source.
+
 ## Database (SQLite WAL, `database/control.db`)
 
-Migration `schema_migrations`: v1 schema gốc, v2 `devices`/`speed_tests`/`security_events` + cột device trên sessions, v3 cột traffic tích luỹ trên `devices`. Không xoá/sửa dữ liệu cũ; quota không bị reset khi upgrade.
+Migration `schema_migrations`: v1 schema gốc, v2 `devices`/`speed_tests`/`security_events` + cột device trên sessions, v3 cột traffic tích luỹ trên `devices`, v4 `notifications`, v5 `experimental_clients`, v6 metadata thiết bị, v7 `traffic_usage.overhead_bytes` + `research_runs` + `carrier_reports`. Không xoá/sửa dữ liệu cũ; quota không bị reset khi upgrade.
 
 Bảng chính: `admins`, `users`, `vpn_clients`, `subscriptions`, `traffic_usage`, `quota_history`, `connection_sessions`, `server_metrics`, `audit_logs`, `sessions`, `devices`, `speed_tests`, `security_events`.
 

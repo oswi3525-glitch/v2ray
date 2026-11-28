@@ -1,0 +1,112 @@
+[
+  {
+    "name": "admin login",
+    "status": "PASS",
+    "detail": ""
+  },
+  {
+    "name": "an active friend account exists (run npm test first)",
+    "status": "PASS",
+    "detail": ""
+  },
+  {
+    "name": "full-tunnel profile endpoint returns JSON",
+    "status": "PASS",
+    "detail": ""
+  },
+  {
+    "name": "full-tunnel routes everything via proxy",
+    "status": "PASS",
+    "detail": ""
+  },
+  {
+    "name": "full-tunnel handles IPv6 without an outside route",
+    "status": "PASS",
+    "detail": ""
+  },
+  {
+    "name": "full-tunnel sends DNS through the tunnel",
+    "status": "PASS",
+    "detail": ""
+  },
+  {
+    "name": "full-tunnel outbound matches the account UUID and public endpoint",
+    "status": "PASS",
+    "detail": ""
+  },
+  {
+    "name": "sing-box accepts the generated full-tunnel profile",
+    "status": "PASS",
+    "detail": ""
+  },
+  {
+    "name": "large JSON API response is gzip-compressed and decodable",
+    "status": "PASS",
+    "detail": "encoding=gzip bytes=657"
+  },
+  {
+    "name": "usage summary aggregates upload/download per source",
+    "status": "PASS",
+    "detail": ""
+  },
+  {
+    "name": "usage summary reports tunnel overhead separately",
+    "status": "PASS",
+    "detail": ""
+  },
+  {
+    "name": "usage summary exposes daily/weekly/monthly buckets",
+    "status": "PASS",
+    "detail": ""
+  },
+  {
+    "name": "usage summary is labelled as server-observed, not carrier bill",
+    "status": "PASS",
+    "detail": ""
+  },
+  {
+    "name": "carrier report computes server-side bytes for the same window",
+    "status": "PASS",
+    "detail": ""
+  },
+  {
+    "name": "carrier report flags no mismatch when figures agree",
+    "status": "PASS",
+    "detail": ""
+  },
+  {
+    "name": "carrier report detects a large client/carrier mismatch",
+    "status": "PASS",
+    "detail": ""
+  },
+  {
+    "name": "carrier report rejects inverted periods",
+    "status": "PASS",
+    "detail": ""
+  },
+  {
+    "name": "research hypotheses are exposed with evidence states",
+    "status": "PASS",
+    "detail": ""
+  },
+  {
+    "name": "research policy forbids spoofing/billing evasion",
+    "status": "PASS",
+    "detail": ""
+  },
+  {
+    "name": "research run returns real probe structure",
+    "status": "PASS",
+    "detail": ""
+  },
+  {
+    "name": "research run states it does not prove carrier billing",
+    "status": "PASS",
+    "detail": ""
+  },
+  {
+    "name": "research runs are persisted",
+    "status": "PASS",
+    "detail": ""
+  }
+]
