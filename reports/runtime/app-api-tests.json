@@ -1,0 +1,187 @@
+[
+  {
+    "name": "an active friend account exists",
+    "status": "PASS",
+    "detail": ""
+  },
+  {
+    "name": "API discovery endpoint works without auth",
+    "status": "PASS",
+    "detail": ""
+  },
+  {
+    "name": "discovery advertises bearer auth",
+    "status": "PASS",
+    "detail": ""
+  },
+  {
+    "name": "token login succeeds",
+    "status": "PASS",
+    "detail": "http=200"
+  },
+  {
+    "name": "login returns snake_case token fields",
+    "status": "PASS",
+    "detail": ""
+  },
+  {
+    "name": "login does not return raw password",
+    "status": "PASS",
+    "detail": ""
+  },
+  {
+    "name": "token is stored as a hash, not plaintext",
+    "status": "PASS",
+    "detail": ""
+  },
+  {
+    "name": "bearer token authenticates /api/auth/me",
+    "status": "PASS",
+    "detail": ""
+  },
+  {
+    "name": "bearer session has no CSRF requirement",
+    "status": "PASS",
+    "detail": ""
+  },
+  {
+    "name": "bearer session reports expiry",
+    "status": "PASS",
+    "detail": ""
+  },
+  {
+    "name": "missing token is rejected",
+    "status": "PASS",
+    "detail": ""
+  },
+  {
+    "name": "bearer POST does not need a CSRF header",
+    "status": "PASS",
+    "detail": "http=200"
+  },
+  {
+    "name": "VPN config endpoint works with bearer",
+    "status": "PASS",
+    "detail": ""
+  },
+  {
+    "name": "config exposes a parseable VLESS URI",
+    "status": "PASS",
+    "detail": ""
+  },
+  {
+    "name": "config parsed fields match the account UUID",
+    "status": "PASS",
+    "detail": ""
+  },
+  {
+    "name": "config network/security are honest for public TCP mode",
+    "status": "PASS",
+    "detail": ""
+  },
+  {
+    "name": "config includes full-tunnel profile and metadata",
+    "status": "PASS",
+    "detail": ""
+  },
+  {
+    "name": "config is marked no-store",
+    "status": "PASS",
+    "detail": ""
+  },
+  {
+    "name": "VPN status endpoint works with bearer",
+    "status": "PASS",
+    "detail": ""
+  },
+  {
+    "name": "status exposes real booleans, not a fake connected flag",
+    "status": "PASS",
+    "detail": ""
+  },
+  {
+    "name": "status does not force tunnel_active true",
+    "status": "PASS",
+    "detail": ""
+  },
+  {
+    "name": "VPN metrics endpoint works with bearer",
+    "status": "PASS",
+    "detail": ""
+  },
+  {
+    "name": "metrics are labelled server-observed",
+    "status": "PASS",
+    "detail": ""
+  },
+  {
+    "name": "metrics used_bytes includes the injected real DB traffic",
+    "status": "PASS",
+    "detail": "58734259 >= 58734259"
+  },
+  {
+    "name": "metrics overhead is tracked separately",
+    "status": "PASS",
+    "detail": ""
+  },
+  {
+    "name": "metrics up/down bitrate is measured over a real window",
+    "status": "PASS",
+    "detail": "up=683 down=1365"
+  },
+  {
+    "name": "metrics rate source is recorded traffic",
+    "status": "PASS",
+    "detail": ""
+  },
+  {
+    "name": "metrics report active only after real traffic",
+    "status": "PASS",
+    "detail": ""
+  },
+  {
+    "name": "metrics include real session history array",
+    "status": "PASS",
+    "detail": ""
+  },
+  {
+    "name": "metrics disclose what the server cannot measure",
+    "status": "PASS",
+    "detail": ""
+  },
+  {
+    "name": "metrics do not expose admin-only host stats",
+    "status": "PASS",
+    "detail": ""
+  },
+  {
+    "name": "refresh rotates tokens",
+    "status": "PASS",
+    "detail": ""
+  },
+  {
+    "name": "old refresh token cannot be reused",
+    "status": "PASS",
+    "detail": ""
+  },
+  {
+    "name": "new access token works",
+    "status": "PASS",
+    "detail": ""
+  },
+  {
+    "name": "refresh rotation does not invalidate a live access token",
+    "status": "PASS",
+    "detail": ""
+  },
+  {
+    "name": "bearer logout succeeds",
+    "status": "PASS",
+    "detail": ""
+  },
+  {
+    "name": "logged-out token is rejected",
+    "status": "PASS",
+    "detail": ""
+  }
+]

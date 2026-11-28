@@ -281,6 +281,30 @@ function migrate() {
       db.exec('COMMIT');
     } catch (e) { db.exec('ROLLBACK'); throw e; }
   }
+  if (!applied.has(8)) {
+    db.exec('BEGIN');
+    try {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS api_tokens (
+          id TEXT PRIMARY KEY,
+          user_id INTEGER NOT NULL,
+          role TEXT NOT NULL,
+          token_hash TEXT NOT NULL UNIQUE,
+          refresh_hash TEXT NOT NULL UNIQUE,
+          created_at TEXT NOT NULL,
+          access_expires_at TEXT NOT NULL,
+          refresh_expires_at TEXT NOT NULL,
+          last_used_at TEXT,
+          revoked_at TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_api_tokens_user ON api_tokens(user_id);
+        CREATE INDEX IF NOT EXISTS idx_api_tokens_access ON api_tokens(token_hash);
+        CREATE INDEX IF NOT EXISTS idx_api_tokens_refresh ON api_tokens(refresh_hash);
+      `);
+      db.prepare('INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)').run(8, now());
+      db.exec('COMMIT');
+    } catch (e) { db.exec('ROLLBACK'); throw e; }
+  }
   return applied;
 }
 migrate();
@@ -481,6 +505,78 @@ function trafficSummary(userId, { buckets = 30, sinceIso = null } = {}) {
 function sessionHistory(userId, limit = 50) {
   return db.prepare(`SELECT id, ts_start, ts_end, upload_bytes, download_bytes, status, remote, device_id, last_traffic_at
     FROM connection_sessions WHERE user_id=? ORDER BY id DESC LIMIT ?`).all(Number(userId), limit);
+}
+
+function trafficRates(userId, windowMs = 6000) {
+  const since = new Date(Date.now() - Math.max(1000, windowMs)).toISOString();
+  const row = db.prepare(`SELECT COALESCE(SUM(upload_bytes),0) AS up, COALESCE(SUM(download_bytes),0) AS down
+    FROM traffic_usage WHERE user_id=? AND ts>=?`).get(Number(userId), since);
+  const seconds = Math.max(1, windowMs / 1000);
+  return {
+    window_ms: windowMs,
+    up_bps: Math.round(Number(row.up) / seconds),
+    down_bps: Math.round(Number(row.down) / seconds),
+    sampled_bytes: Number(row.up) + Number(row.down)
+  };
+}
+
+function hashToken(token) {
+  return crypto.createHash('sha256').update(String(token)).digest('hex');
+}
+
+function issueApiTokens(userId, role, { accessTtlSec = 3600, refreshTtlSec = 30 * 86400 } = {}) {
+  const token = crypto.randomBytes(32).toString('base64url');
+  const refreshToken = crypto.randomBytes(48).toString('base64url');
+  const id = crypto.randomUUID();
+  const ts = now();
+  const accessExp = new Date(Date.now() + accessTtlSec * 1000).toISOString();
+  const refreshExp = new Date(Date.now() + refreshTtlSec * 1000).toISOString();
+  db.prepare(`INSERT INTO api_tokens (id, user_id, role, token_hash, refresh_hash, created_at, access_expires_at, refresh_expires_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
+    .run(id, Number(userId), String(role), hashToken(token), hashToken(refreshToken), ts, accessExp, refreshExp);
+  return { token, refresh_token: refreshToken, expires_in: accessTtlSec, token_id: id };
+}
+
+function findApiToken(token) {
+  if (typeof token !== 'string' || token.length < 16) return null;
+  const row = db.prepare('SELECT * FROM api_tokens WHERE token_hash=?').get(hashToken(token));
+  if (!row || row.revoked_at) return null;
+  if (Date.parse(row.access_expires_at) <= Date.now()) return null;
+  const last = row.last_used_at ? Date.parse(row.last_used_at) : 0;
+  if (Date.now() - last > 60000) {
+    db.prepare('UPDATE api_tokens SET last_used_at=? WHERE id=?').run(now(), row.id);
+  }
+  return row;
+}
+
+function rotateApiRefresh(refreshToken) {
+  if (typeof refreshToken !== 'string' || refreshToken.length < 16) return null;
+  const row = db.prepare('SELECT * FROM api_tokens WHERE refresh_hash=?').get(hashToken(refreshToken));
+  if (!row || row.revoked_at) return null;
+  if (Date.parse(row.refresh_expires_at) <= Date.now()) return null;
+  db.exec('BEGIN');
+  try {
+    db.prepare(`UPDATE api_tokens SET refresh_hash=?, refresh_expires_at=? WHERE id=?`)
+      .run(hashToken(crypto.randomUUID()), now(), row.id);
+    const issued = issueApiTokens(row.user_id, row.role);
+    db.exec('COMMIT');
+    return { ...issued, user_id: row.user_id, role: row.role };
+  } catch (e) { db.exec('ROLLBACK'); throw e; }
+}
+
+function revokeApiToken(token) {
+  if (typeof token !== 'string' || !token) return 0;
+  return db.prepare('UPDATE api_tokens SET revoked_at=? WHERE token_hash=? AND revoked_at IS NULL')
+    .run(now(), hashToken(token)).changes;
+}
+
+function revokeApiTokenById(id) {
+  return db.prepare('UPDATE api_tokens SET revoked_at=? WHERE id=? AND revoked_at IS NULL').run(now(), String(id)).changes;
+}
+
+function purgeApiTokens() {
+  const t = now();
+  db.prepare('DELETE FROM api_tokens WHERE access_expires_at < ? AND refresh_expires_at < ?').run(t, t);
 }
 
 function addResearchRun(r) {
@@ -702,7 +798,8 @@ module.exports = {
   adminExists, createAdmin, seedAdminFromEnv, getAdmin, updateAdminHash,
   friendCount, listUsers, getUser, getUserByUsername, getUserByToken, getVpnClient, getSubscription,
   createFriend, setFriendPassword, changeQuota, setUserState, revokeFriend,
-  recordTraffic, trafficHistory, trafficTotals, trafficSummary, sessionHistory,
+  recordTraffic, trafficHistory, trafficTotals, trafficSummary, trafficRates, sessionHistory,
+  issueApiTokens, findApiToken, rotateApiRefresh, revokeApiToken, revokeApiTokenById, purgeApiTokens,
   addResearchRun, listResearchRuns, addCarrierReport, listCarrierReports,
   openSession, getSession, deleteSession, purgeSessions,
   addMetric, metrics, activeVpnUsers, listExperimentalClients, auditLogs,

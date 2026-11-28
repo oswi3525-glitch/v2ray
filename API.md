@@ -2,15 +2,19 @@
 
 Base URL: cùng origin với web panel. Public `http://vn-hn.cldcode.host:23952` đi qua `control/port-mux.js` → Fastify nội bộ `127.0.0.1:23950`. Cloudflare HTTPS subdomain hiện trả 404 cho `/api` và `/vpn` (xem `CONNECTIVITY_AUDIT.md`).
 
-Auth: session cookie `tiktunnel_session` (HttpOnly). All mutating admin requests also require header `x-csrf-token` with the value returned by login. Friend endpoints require a friend session.
+> App iOS dùng hợp đồng riêng tại `APP_API.md`: Bearer token (`POST /api/tikfl/login`, `POST /api/auth/refresh`) và `GET /api/vpn/config|status|metrics`. Cookie bên dưới vẫn tương thích.
+
+Auth: session cookie `tiktunnel_session` (HttpOnly) hoặc `Authorization: Bearer <token>` (Bearer không cần CSRF). All mutating admin requests also require header `x-csrf-token` with the value returned by login. Friend endpoints require a friend session.
 
 ## Authentication
 
 | Method | Path | Auth | Purpose |
 |---|---|---|---|
-| POST | `/api/auth/login` | none | `{username,password}` → `{role,csrf}` |
-| POST | `/api/auth/logout` | session | end session |
-| GET | `/api/auth/me` | session | `{role,csrf,username}` |
+| POST | `/api/auth/login` | none | `{username,password}` → `{role,csrf}` (web) |
+| POST | `/api/tikfl/login` | none | `{username,password}` → `{token,refresh_token,expires_in,role,user}` (app) |
+| POST | `/api/auth/refresh` | none | `{refresh_token}` → rotate tokens |
+| POST | `/api/auth/logout` | session/Bearer | end session / revoke token |
+| GET | `/api/auth/me` | session/Bearer | `{role,csrf,username,expires_in,user}` |
 | GET | `/api/notifications?limit&offset` | session | `{items,unread}` — real events (quota, password, device, account) |
 | POST | `/api/notifications/read` | session + CSRF | `{id?}` marks one or all read |
 

@@ -13,6 +13,7 @@ const HTTP_METHOD = /^(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\s/;
 const MAX_CONNECTIONS = Number(cfg.mux_max_connections || 2000);
 const CLASSIFY_TIMEOUT = Number(cfg.mux_classify_timeout_ms || 5000);
 const FLUSH_MS = 2000;
+const SOCKET_HWM = Number(cfg.mux_socket_high_water_mark || 64 * 1024);
 
 let connections = 0;
 let httpCount = 0;
@@ -120,6 +121,8 @@ function pipe(client, decision) {
   }
   target.setNoDelay(true);
   client.setNoDelay(true);
+  target.setKeepAlive(true, 30000);
+  client.setKeepAlive(true, 30000);
   const done = () => { try { target.destroy(); } catch {} };
   client.once('close', done);
   client.once('error', done);
@@ -129,7 +132,7 @@ function pipe(client, decision) {
   else unknownCount++;
 }
 
-const server = net.createServer({ pauseOnConnect: true }, (client) => {
+const server = net.createServer({ pauseOnConnect: true, highWaterMark: SOCKET_HWM }, (client) => {
   if (connections >= MAX_CONNECTIONS) { client.destroy(); return; }
   connections++;
   const timer = setTimeout(() => client.destroy(), CLASSIFY_TIMEOUT);
@@ -169,7 +172,7 @@ server.on('error', (e) => {
   process.stderr.write(`port-mux failed: ${e.message}\n`);
   process.exit(1);
 });
-server.listen(listenPort, '0.0.0.0', () => {
+server.listen(listenPort, '0.0.0.0', 511, () => {
   process.stdout.write(`tiktunnel-port-mux listening on 0.0.0.0:${listenPort} http=${httpPort} vless=${vlessPort}\n`);
 });
 

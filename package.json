@@ -11,7 +11,8 @@
     "test:performance": "node tests/control-performance.js",
     "test:stability": "node tests/control-stability.js 120",
     "test:core": "node tests/core-upgrade-test.js",
-    "test:all": "node tests/control-test.js && node tests/core-upgrade-test.js"
+    "test:app": "node tests/app-api-test.js",
+    "test:all": "node tests/control-test.js && node tests/core-upgrade-test.js && node tests/app-api-test.js"
   },
   "dependencies": {
     "bcryptjs": "3.0.3",

@@ -2,7 +2,7 @@
 
 Rootless VPN control panel: admin + up to `MAX_USERS` friends, per-user quota from **real VPN traffic**, live data/speed dashboard, Device Activity, real Network Test, and one-tap Shadowrocket import. Node/Fastify + SQLite (`node:sqlite`) + sing-box VLESS-over-WebSocket.
 
-> **Trạng thái quan trọng:** E2E 36/36 PASS, VLESS TCP thật 8 MiB qua port-mux (local). Endpoint public `vn-hn.cldcode.host:23952` hiện là **deployment khác DB/admin** nên UUID/token local không tồn tại ở đó — Shadowrocket sẽ báo lỗi máy chủ cho tới khi deploy đúng account lên host public. Cloudflare HTTPS trả 404 và forwarder chặn WebSocket. Xem `CONNECTIVITY_AUDIT.md`.
+> **Trạng thái quan trọng:** E2E 39/39 PASS, core 22/22, app API 37/37. VLESS TCP thật 8 MiB qua port-mux (local). Endpoint public `vn-hn.cldcode.host:23952` hiện là **deployment khác DB/admin** nên UUID/token local không tồn tại ở đó — Shadowrocket sẽ báo lỗi máy chủ cho tới khi deploy đúng account lên host public. Cloudflare HTTPS trả 404 và forwarder chặn WebSocket. Xem `CONNECTIVITY_AUDIT.md`.
 
 ## Yêu cầu
 
@@ -54,14 +54,19 @@ Startup command cho Pterodactyl/Cloudcode xem `INSTALL.md`.
 
 ## API
 
-Xem `API.md`. Tóm tắt: `/api/auth/*`, `/api/admin/*`, `/api/friend/*`, `/api/net/*` (ping/download/upload), `/api/monitor/*`, `/api/sub/:token`.
+- **App iOS (chính thức):** xem `APP_API.md` — Bearer token (`/api/tikfl/login`, `/api/auth/refresh`), `/api/vpn/config|status|metrics`, chỉ số server-observed thật, keep-alive, và kế hoạch tắt web.
+- Web/dashboard cũ & admin: xem `API.md`. Tóm tắt: `/api/auth/*`, `/api/admin/*`, `/api/friend/*`, `/api/net/*`, `/api/monitor/*`, `/api/sub/:token`.
+- `GET /api` trả discovery; `GET /health` trả `api_version`, `mode`, `web_enabled`.
+
+Web có thể tắt mà không ảnh hưởng API: `"web_enabled": false` trong `config/control.json` hoặc `TIKTUNNEL_DISABLE_WEB=1`.
 
 ## Test
 
 ```bash
 npm test                              # E2E 39 checks
 npm run test:core                     # 22 checks: full-tunnel profile, usage, research, compression
-npm run test:all                      # chạy cả hai suite
+npm run test:app                      # 37 checks: bearer/refresh + /api/vpn/* metrics thật
+npm run test:all                      # chạy cả ba suite
 npm run test:tiktok                   # probe thật DNS/TCP/TLS/HTTP tới tiktokv.com
 node tests/device-activity-test.js    # Active → Idle → Offline (~70s)
 node tests/network-benchmark.js       # benchmark thật, ghi reports/runtime/
@@ -70,4 +75,4 @@ npm audit --audit-level=low           # 0 vulnerabilities
 
 ## Tài liệu
 
-`CONNECTIVITY_AUDIT.md` (báo cáo điều tra lỗi kết nối), `CHANGELOG.md`, `ARCHITECTURE.md`, `SECURITY_AUDIT.md`, `SHADOWROCKET_IMPORT.md`, `NETWORK_TEST.md`, `DEVICE_ACTIVITY.md`, `PERFORMANCE_REPORT.md`, `UI_UX_REPORT.md`, `API.md`, `DATABASE.md`, `INSTALL.md`, `TROUBLESHOOTING.md`, `reports/*`.
+`APP_API.md` (hợp đồng API cho app iOS), `CONNECTIVITY_AUDIT.md` (báo cáo điều tra lỗi kết nối), `CHANGELOG.md`, `ARCHITECTURE.md`, `SECURITY_AUDIT.md`, `SHADOWROCKET_IMPORT.md`, `NETWORK_TEST.md`, `DEVICE_ACTIVITY.md`, `PERFORMANCE_REPORT.md`, `UI_UX_REPORT.md`, `API.md`, `DATABASE.md`, `INSTALL.md`, `TROUBLESHOOTING.md`, `reports/*`.

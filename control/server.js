@@ -25,7 +25,8 @@ const control = (() => {
     publicTcpHost: envcfg.serverHost || c.public_tcp_host,
     publicTcpPort: Number(envcfg.serverPort || c.public_tcp_port || 23952),
     publicTransport: c.public_transport || 'ws',
-    cookieSecure: c.cookie_secure === true
+    cookieSecure: c.cookie_secure === true,
+    webEnabled: process.env.TIKTUNNEL_DISABLE_WEB !== '1' && c.web_enabled !== false
   };
 })();
 
@@ -37,7 +38,15 @@ const RESEARCH_TARGETS = [
   { id: 'cloudflare', label: 'Cloudflare (cloudflare.com)', host: 'cloudflare.com' }
 ];
 
-const app = Fastify({ logger: false, bodyLimit: 16 * 1024, trustProxy: false });
+const app = Fastify({
+  logger: false,
+  bodyLimit: 16 * 1024,
+  trustProxy: false,
+  connectionTimeout: 30000,
+  keepAliveTimeout: 72000,
+  requestTimeout: 0,
+  maxRequestsPerSocket: 0
+});
 app.addContentTypeParser('application/octet-stream', { parseAs: 'buffer' }, (_req, body, done) => done(null, body));
 const startedAt = Date.now();
 const apiTimes = [];
@@ -57,7 +66,26 @@ function cookieMap(req) {
   }
   return out;
 }
+function bearerToken(req) {
+  const h = req.headers.authorization || '';
+  return h.startsWith('Bearer ') ? h.slice(7).trim() : '';
+}
 function sessionFor(req) {
+  const token = bearerToken(req);
+  if (token) {
+    const row = cdb.findApiToken(token);
+    if (row) {
+      return {
+        id: `token:${row.id}`,
+        token_id: row.id,
+        user_id: row.user_id,
+        role: row.role,
+        csrf: null,
+        bearer: true,
+        expires_in: Math.max(0, Math.floor((Date.parse(row.access_expires_at) - Date.now()) / 1000))
+      };
+    }
+  }
   const id = cookieMap(req).tiktunnel_session;
   return id ? cdb.getSession(id) : null;
 }
@@ -74,6 +102,7 @@ function guard(req, reply, role) {
   return { session: s, user: cdb.getUser(s.user_id), role: s.role };
 }
 function csrfOk(req, auth) {
+  if (auth.session.bearer) return true;
   return req.headers['x-csrf-token'] === auth.session.csrf;
 }
 function setSessionCookie(reply, s) {
@@ -312,6 +341,9 @@ app.addHook('onResponse', async (req) => {
 // and never re-compresses already-compressed or binary bodies.
 app.addHook('onSend', async (req, reply, payload) => {
   try {
+    if (String(req.url).startsWith('/api/') && !reply.getHeader('cache-control')) {
+      reply.header('Cache-Control', 'no-store');
+    }
     if (req.method === 'HEAD' || reply.statusCode !== 200) return payload;
     if (!String(reply.getHeader('content-type') || '').includes('application/json')) return payload;
     if (reply.getHeader('content-encoding')) return payload;
@@ -341,6 +373,7 @@ app.setErrorHandler((err, _req, reply) => reply.code(400).send({ ok: false, erro
 
 function readStatic(name, type) {
   return (req, reply) => {
+    if (!control.webEnabled) return reply.code(404).send({ ok: false, error: 'web_disabled' });
     reply.header('Cache-Control', 'no-store, max-age=0');
     let body = fs.readFileSync(path.join(ROOT, 'web', name));
     if (name.endsWith('.html')) {
@@ -358,9 +391,38 @@ app.get('/app.js', readStatic('app.js', 'application/javascript; charset=utf-8')
 app.get('/boot-guard.js', readStatic('boot-guard.js', 'application/javascript; charset=utf-8'));
 app.get('/plan-check', readStatic('plan-check.html', 'text/html; charset=utf-8'));
 app.get('/plan-check.js', readStatic('plan-check.js', 'application/javascript; charset=utf-8'));
-app.get('/health', async () => ({ ok: true, service: 'tiktunnel-control', uptime_s: Math.floor((Date.now() - startedAt) / 1000) }));
+app.get('/health', async () => ({
+  ok: true,
+  service: 'tiktunnel-control',
+  api_version: 1,
+  mode: control.publicTransport,
+  web_enabled: control.webEnabled,
+  uptime_s: Math.floor((Date.now() - startedAt) / 1000)
+}));
 
-app.post('/api/auth/login', async (req, reply) => {
+app.get('/api', async () => ({
+  ok: true,
+  service: 'tiktunnel-control',
+  api_version: 1,
+  auth: ['bearer', 'cookie'],
+  transport: control.publicTransport,
+  web_enabled: control.webEnabled,
+  endpoints: {
+    login: 'POST /api/tikfl/login',
+    refresh: 'POST /api/auth/refresh',
+    me: 'GET /api/auth/me',
+    config: 'GET /api/vpn/config',
+    status: 'GET /api/vpn/status',
+    metrics: 'GET /api/vpn/metrics',
+    import: 'GET /api/friend/import',
+    live: 'GET /api/friend/live',
+    ping: 'GET /api/net/ping',
+    speedtests: 'GET /api/friend/speedtests'
+  },
+  docs: 'APP_API.md'
+}));
+
+async function handleLogin(req, reply, { withTokens }) {
   const username = typeof req.body?.username === 'string' ? req.body.username.trim() : '';
   const password = typeof req.body?.password === 'string' ? req.body.password : '';
   const key = `${req.ip}|${username || '-'}`;
@@ -398,13 +460,50 @@ app.post('/api/auth/login', async (req, reply) => {
   setSessionCookie(reply, s);
   cdb.audit(role, 'login', username);
   cdb.securityEvent(role, 'login', username, req.ip);
-  return reply.send({ ok: true, role, csrf: s.csrf });
+  const body = { ok: true, role, csrf: s.csrf };
+  if (withTokens) {
+    const t = cdb.issueApiTokens(user.id, role);
+    body.token = t.token;
+    body.access_token = t.token;
+    body.refresh_token = t.refresh_token;
+    body.expires_in = t.expires_in;
+    body.user = { username: user.username, display_name: user.display_name || user.username, role };
+  }
+  return reply.send(body);
+}
+
+app.post('/api/auth/login', (req, reply) => handleLogin(req, reply, { withTokens: false }));
+app.post('/api/tikfl/login', (req, reply) => handleLogin(req, reply, { withTokens: true }));
+
+app.post('/api/auth/refresh', async (req, reply) => {
+  if (rateLimited(req, 'refresh', 60, 60000)) {
+    return reply.code(429).send({ ok: false, error: 'too_many_attempts' });
+  }
+  const refreshToken = req.body?.refresh_token || req.body?.refreshToken;
+  const rotated = cdb.rotateApiRefresh(refreshToken);
+  if (!rotated) return reply.code(401).send({ ok: false, error: 'invalid_refresh' });
+  const u = rotated.role === 'admin' ? cdb.getAdmin() : cdb.getUser(rotated.user_id);
+  if (!u || u.revoked_at || (rotated.role === 'friend' && u.enabled !== 1)) {
+    cdb.revokeApiTokenById(rotated.token_id);
+    return reply.code(401).send({ ok: false, error: 'account_unavailable' });
+  }
+  return reply.send({
+    ok: true,
+    role: rotated.role,
+    token: rotated.token,
+    access_token: rotated.token,
+    refresh_token: rotated.refresh_token,
+    expires_in: rotated.expires_in,
+    user: { username: u.username, display_name: u.display_name || u.username, role: rotated.role }
+  });
 });
 
 app.post('/api/auth/logout', async (req, reply) => {
   const s = sessionFor(req);
-  if (!s || req.headers['x-csrf-token'] !== s.csrf) return reply.code(401).send({ ok: false, error: 'unauthorized' });
-  cdb.deleteSession(s.id);
+  const auth = { session: s };
+  if (!s || !csrfOk(req, auth)) return reply.code(401).send({ ok: false, error: 'unauthorized' });
+  if (s.bearer) cdb.revokeApiTokenById(s.token_id);
+  else cdb.deleteSession(s.id);
   clearSessionCookie(reply);
   cdb.securityEvent(s.role, 'logout', String(s.user_id), req.ip);
   return reply.send({ ok: true });
@@ -414,7 +513,15 @@ app.get('/api/auth/me', async (req, reply) => {
   const s = sessionFor(req);
   if (!s) return reply.code(401).send({ ok: false, error: 'unauthorized' });
   const u = s.role === 'admin' ? cdb.getAdmin() : cdb.getUser(s.user_id);
-  return reply.send({ ok: true, role: s.role, csrf: s.csrf, username: u?.username });
+  return reply.send({
+    ok: true,
+    role: s.role,
+    csrf: s.csrf,
+    username: u?.username,
+    display_name: u?.display_name,
+    expires_in: s.expires_in,
+    user: u ? { username: u.username, display_name: u.display_name || u.username, role: s.role } : null
+  });
 });
 
 app.get('/api/diagnostics/run', async (req, reply) => {
@@ -753,6 +860,123 @@ app.get('/api/sub/:token/profile', async (req, reply) => {
 app.get('/api/friend/vpn', async (req, reply) => {
   const a = guard(req, reply, 'friend'); if (!a) return;
   return reply.send({     ok: true, uri: vlessUri(a.user, req.query.device), experimental_uri: experimentalUri(a.user, req.query.device), experimental_enabled: experimentalEnabled(), mode: control.publicTransport, active: cdb.activeVpnUsers().some((u) => u.id === a.user.id) });
+});
+
+function parseVlessConfig(u, deviceId = null) {
+  const uri = vlessUri(u, deviceId);
+  if (!uri) return null;
+  let parsed;
+  try { parsed = new URL(uri); } catch { return null; }
+  const q = parsed.searchParams;
+  return {
+    uuid: decodeURIComponent(parsed.username || ''),
+    address: parsed.hostname,
+    port: Number(parsed.port) || 443,
+    network: q.get('type') || 'tcp',
+    security: q.get('security') || 'none',
+    sni: q.get('sni') || '',
+    host: q.get('host') || '',
+    path: q.get('path') || '',
+    flow: q.get('flow') || '',
+    name: decodeURIComponent((parsed.hash || '').slice(1) || ''),
+    mtu: 1400
+  };
+}
+
+app.get('/api/vpn/config', async (req, reply) => {
+  const a = guard(req, reply, 'friend'); if (!a) return;
+  const u = cdb.getUser(a.user.id) || a.user;
+  const deviceId = cdb.validDeviceId(req.query.device) ? req.query.device : null;
+  const ready = accountReady(u);
+  const uri = vlessUri(u, deviceId);
+  const sub = cdb.getSubscription(u.id);
+  const profile = ready ? buildFullTunnelProfile(u, deviceId) : null;
+  reply.header('Cache-Control', 'no-store');
+  return reply.send({
+    ok: true,
+    ready: ready && !!uri,
+    server_ready: processAlive(readPid('sing-box.pid')),
+    account_ready: ready,
+    config_ready: !!uri,
+    uri,
+    subscription_url: sub ? `/api/sub/${sub.token}` : null,
+    experimental_uri: experimentalUri(u, deviceId),
+    config: uri ? parseVlessConfig(u, deviceId) : null,
+    full_tunnel: profile ? profile.config : null,
+    profile_meta: profile ? profile.meta : null,
+    mode: control.publicTransport
+  });
+});
+
+app.get('/api/vpn/status', async (req, reply) => {
+  const s = sessionFor(req);
+  if (!s) return reply.code(401).send({ ok: false, error: 'unauthorized' });
+  if (s.role !== 'friend') return reply.code(403).send({ ok: false, error: 'forbidden' });
+  const u = cdb.getUser(s.user_id);
+  if (!u) return reply.code(404).send({ ok: false, error: 'not_found' });
+  const stats = liveStats(u);
+  const sub = cdb.getSubscription(u.id);
+  return reply.send({
+    ok: true,
+    server_ready: processAlive(readPid('sing-box.pid')),
+    account_ready: accountReady(u),
+    config_ready: !!(vlessUri(u) && sub),
+    tunnel_active: stats.active,
+    last_traffic_at: stats.last_traffic_at,
+    transport_observed: stats.transport_observed,
+    used_bytes: stats.used_bytes,
+    remaining_bytes: stats.remaining_bytes,
+    mode: control.publicTransport,
+    public_endpoint: control.publicTransport === 'tcp'
+      ? `${control.publicTcpHost}:${control.publicTcpPort}`
+      : control.public_https_host,
+    server_time: new Date().toISOString()
+  });
+});
+
+app.get('/api/vpn/metrics', async (req, reply) => {
+  const a = guard(req, reply, 'friend'); if (!a) return;
+  const u = cdb.getUser(a.user.id) || a.user;
+  const stats = liveStats(u);
+  const totals = cdb.trafficTotals(u.id);
+  const sessions = cdb.sessionHistory(u.id, 10).map((r) => ({
+    id: r.id,
+    started_at: r.ts_start,
+    ended_at: r.ts_end,
+    upload_bytes: r.upload_bytes,
+    download_bytes: r.download_bytes,
+    status: r.status,
+    device_id: r.device_id,
+    last_traffic_at: r.last_traffic_at
+  }));
+  reply.header('Cache-Control', 'no-store');
+  return reply.send({
+    ok: true,
+    generated_at: new Date().toISOString(),
+    scope: 'server_observed',
+    active: stats.active,
+    tunnel_open: stats.tunnel_open,
+    last_traffic_at: stats.last_traffic_at,
+    used_upload: totals.up,
+    used_download: totals.down,
+    used_bytes: totals.total,
+    overhead_bytes: totals.overhead,
+    quota_bytes: u.quota_bytes || 0,
+    remaining_bytes: Math.max(0, (u.quota_bytes || 0) - totals.total),
+    up_bps: stats.up_bps,
+    down_bps: stats.down_bps,
+    total_bps: stats.total_bps,
+    rate_window_ms: stats.rate_window_ms,
+    rate_source: 'traffic_usage',
+    sessions,
+    speedtests: cdb.speedTests(u.id, 5),
+    server: {
+      api_latency_ms: apiTimes.length ? +(apiTimes.reduce((x, y) => x + y, 0) / apiTimes.length).toFixed(2) : 0,
+      reachable: true,
+      mode: control.publicTransport
+    },
+    note: 'Server-side byte counts are authoritative for quota. Bitrate is measured from recorded traffic windows, not simulated. iOS tunnel CPU/memory and packet loss are not observable here; use local TunnelMetrics on the device.'
+  });
 });
 app.get('/api/friend/import', async (req, reply) => {
   if (req.query && req.query.branch === 'experimental') return experimentalImportHandler(req, reply);
@@ -1331,8 +1555,9 @@ function liveStats(user) {
   const usedDownload = (user.used_download || 0) + live.down;
   const now = Date.now();
   const prev = speedPrev.get(user.id);
-  let upBps = 0, downBps = 0;
-  if (prev) {
+  const dbRates = cdb.trafficRates(user.id, 6000);
+  let upBps = dbRates.up_bps, downBps = dbRates.down_bps;
+  if (dbRates.sampled_bytes === 0 && prev) {
     const dt = (now - prev.t) / 1000;
     if (dt > 0) {
       upBps = Math.max(0, (live.up - prev.up) / dt);
@@ -1344,13 +1569,16 @@ function liveStats(user) {
   const dbLast = user.last_seen ? Date.parse(user.last_seen) : 0;
   const lastData = Math.max(wsLast, Number.isFinite(dbLast) ? dbLast : 0);
   const active = lastData > 0 && now - lastData <= 60000;
+  const wsOpen = activeWs.has(user.id);
   return {
     active,
-    tunnel_open: activeWs.has(user.id),
+    tunnel_open: wsOpen,
+    transport_observed: active && !wsOpen ? 'tcp' : (wsOpen ? 'ws' : null),
     last_traffic_at: lastData > 0 ? new Date(lastData).toISOString() : null,
     up_bps: Math.round(upBps),
     down_bps: Math.round(downBps),
     total_bps: Math.round(upBps + downBps),
+    rate_window_ms: dbRates.window_ms,
     used_upload: usedUpload,
     used_download: usedDownload,
     used_bytes: usedUpload + usedDownload,
@@ -1468,6 +1696,7 @@ function enforceQuota() {
     }
   }
   cdb.purgeSessions();
+  cdb.purgeApiTokens();
   const t = Date.now();
   for (const [k, v] of loginFailures) if (v.until <= t) loginFailures.delete(k);
   for (const [k, v] of rateBuckets) if (v.reset <= t) rateBuckets.delete(k);
