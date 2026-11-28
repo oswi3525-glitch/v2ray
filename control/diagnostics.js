@@ -11,10 +11,13 @@ function item(id, label, status, detail = '', cause = '', fix = '', durationMs =
   return { id, label, status, checked_at: new Date().toISOString(), duration_ms: Math.round(durationMs), detail, cause, fix };
 }
 function timed(fn, timeoutMs = 4000) {
-  return Promise.race([
-    fn(),
-    new Promise((_, reject) => setTimeout(() => reject(new Error(`timeout_after_${timeoutMs}ms`)), timeoutMs))
-  ]).catch((e) => { throw e; });
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`timeout_after_${timeoutMs}ms`)), timeoutMs);
+    Promise.resolve().then(fn).then(
+      (value) => { clearTimeout(timer); resolve(value); },
+      (err) => { clearTimeout(timer); reject(err); }
+    );
+  });
 }
 function tcpConnect(host, port, timeout = 3000) {
   return new Promise((resolve, reject) => {
@@ -31,14 +34,21 @@ function rawRequest(host, port, payload, timeout = 3000) {
   return new Promise((resolve, reject) => {
     const s = net.connect(port, host);
     let buf = Buffer.alloc(0);
-    const finish = (err) => { s.destroy(); err ? reject(err) : resolve(buf.toString('latin1')); };
+    let settled = false;
+    const timer = setTimeout(() => finish(new Error('no_response')), timeout);
+    const finish = (err) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      s.destroy();
+      err ? reject(err) : resolve(buf.toString('latin1'));
+    };
     s.setTimeout(timeout);
     s.once('connect', () => s.write(payload));
     s.on('data', (d) => { buf = Buffer.concat([buf, d]); if (buf.length >= 200 || buf.includes('\r\n\r\n')) finish(null); });
     s.once('end', () => finish(null));
     s.once('timeout', () => finish(new Error('no_response')));
     s.once('error', finish);
-    setTimeout(() => { if (!s.destroyed) finish(new Error('no_response')); }, timeout);
   });
 }
 function vlessHeader(uuid, port = 443, host = '1.1.1.1') {
@@ -51,18 +61,20 @@ function vlessAuthProbe(port, uuid, timeout = 2500) {
   return new Promise((resolve) => {
     const s = net.connect(port, '127.0.0.1');
     let opened = false;
-    const finish = (ok, detail) => { if (!s.destroyed) s.destroy(); resolve({ ok, detail }); };
+    let settled = false;
+    const timer = setTimeout(() => finish(opened, opened ? 'connection_stayed_open' : 'no_connect'), timeout);
+    const finish = (ok, detail) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (!s.destroyed) s.destroy();
+      resolve({ ok, detail });
+    };
     s.setTimeout(timeout);
     s.once('connect', () => { opened = true; s.write(vlessHeader(uuid)); });
     s.once('data', () => finish(false, 'unexpected_response_bytes'));
-    s.once('close', () => finish(opened ? false : false, opened ? 'closed_after_handshake' : 'cannot_connect'));
+    s.once('close', () => finish(false, opened ? 'closed_after_handshake' : 'cannot_connect'));
     s.once('error', (e) => finish(false, e.message));
-    setTimeout(() => {
-      if (!s.destroyed) {
-        const ok = opened;
-        finish(ok, ok ? 'connection_stayed_open' : 'no_connect');
-      }
-    }, timeout);
   });
 }
 function tlsProbe(host, port, servername) {

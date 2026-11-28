@@ -1,0 +1,41 @@
+{
+  "log": {
+    "level": "warn",
+    "timestamp": true,
+    "output": "/var/log/sing-box/reality.log"
+  },
+  "inbounds": [
+    {
+      "type": "vless",
+      "tag": "vless-reality-in",
+      "listen": "__REALITY_IP__",
+      "listen_port": 443,
+      "users": [
+        { "name": "user1", "uuid": "__UUID__", "flow": "xtls-rprx-vision" }
+      ],
+      "tls": {
+        "enabled": true,
+        "server_name": "__HANDSHAKE_DOMAIN__",
+        "reality": {
+        "enabled": true,
+        "handshake": {
+          "server": "__HANDSHAKE_DOMAIN__",
+          "server_port": 443
+        },
+        "private_key": "__REALITY_PRIVATE_KEY__",
+        "short_id": ["", "__SHORT_ID__"]
+        }
+      }
+    }
+  ],
+  "outbounds": [
+    { "type": "direct", "tag": "direct" },
+    { "type": "block", "tag": "block" }
+  ],
+  "route": {
+    "rules": [
+      { "ip_is_private": true, "outbound": "block" }
+    ],
+    "final": "direct"
+  }
+}

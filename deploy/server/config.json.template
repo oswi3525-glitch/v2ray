@@ -1,0 +1,50 @@
+{
+  "log": {
+    "level": "warn",
+    "timestamp": true,
+    "output": "/var/log/sing-box/sing-box.log"
+  },
+  "dns": {
+    "servers": [
+      { "type": "local", "tag": "local-dns" }
+    ],
+    "final": "local-dns"
+  },
+  "inbounds": [
+    {
+      "type": "shadowtls",
+      "tag": "shadowtls-in",
+      "listen": "__SHADOWTLS_IP__",
+      "listen_port": 443,
+      "version": 3,
+      "users": [
+        { "name": "user1", "password": "__SHADOWTLS_PASSWORD__" }
+      ],
+      "handshake": {
+        "server": "__HANDSHAKE_DOMAIN__",
+        "server_port": 443
+      },
+      "detour": "ss2022-in",
+      "strict_mode": true,
+      "wildcard_sni": "off"
+    },
+    {
+      "type": "shadowsocks",
+      "tag": "ss2022-in",
+      "listen": "127.0.0.1",
+      "listen_port": 10443,
+      "method": "2022-blake3-aes-128-gcm",
+      "password": "__SS2022_PASSWORD__"
+    }
+  ],
+  "outbounds": [
+    { "type": "direct", "tag": "direct" },
+    { "type": "block", "tag": "block" }
+  ],
+  "route": {
+    "rules": [
+      { "ip_is_private": true, "outbound": "block" }
+    ],
+    "final": "direct"
+  }
+}

@@ -60,11 +60,21 @@ function vlessHeaderLength(head) {
     addrLen = 1 + head[at + 1];
   } else if (type === 4) addrLen = 16;
   else return 0;
-  return at + addrLen + 4;
+  return at + addrLen + 3;
+}
+
+function withClientIp(first, ip) {
+  if (!ip || !first) return first;
+  let text = first.toString('latin1').replace(/\r\nX-Tiktunnel-Client-IP:[^\r\n]*/gi, '');
+  const at = text.indexOf('\r\n\r\n');
+  if (at < 0) return Buffer.from(text, 'latin1');
+  text = text.slice(0, at) + `\r\nX-Tiktunnel-Client-IP: ${ip}` + text.slice(at);
+  return Buffer.from(text, 'latin1');
 }
 
 function classify(head) {
   if (HTTP_METHOD.test(head.toString('latin1', 0, Math.min(head.length, 16)))) {
+    if (!head.includes('\r\n\r\n')) return null;
     return { kind: 'http', first: head };
   }
   if (head.length < 18) return null;
@@ -75,7 +85,10 @@ function classify(head) {
 }
 
 function pipe(client, decision) {
-  const { first, kind, userId, headerBytes = 0 } = decision;
+  const { kind, userId, headerBytes = 0 } = decision;
+  const first = kind === 'http'
+    ? withClientIp(decision.first, client.remoteAddress)
+    : decision.first;
   const targetPort = kind === 'http' ? httpPort : vlessPort;
   let stats = null;
   if (userId && first && first.length > headerBytes) {
@@ -105,7 +118,6 @@ function pipe(client, decision) {
     stats.flushed = true;
   };
   if (stats) {
-    client.on('data', (d) => { stats.up += d.length; });
     client.once('close', finish);
     client.once('error', finish);
   }
@@ -113,6 +125,7 @@ function pipe(client, decision) {
     if (first && first.length) target.write(first);
     client.pipe(target);
     target.pipe(client);
+    if (stats) client.on('data', (d) => { stats.up += d.length; });
   });
   if (stats) {
     target.on('data', (d) => { stats.down += d.length; });
@@ -157,7 +170,8 @@ const server = net.createServer({ pauseOnConnect: true, highWaterMark: SOCKET_HW
         pipe(client, decision);
         return;
       }
-      if (head.length >= 512) {
+      const cap = HTTP_METHOD.test(head.toString('latin1', 0, Math.min(head.length, 16))) ? 8192 : 512;
+      if (head.length >= cap) {
         client.removeListener('readable', onReadable);
         clearTimeout(timer);
         pipe(client, { kind: 'unknown', first: head });

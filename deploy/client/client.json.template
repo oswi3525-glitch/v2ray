@@ -1,0 +1,93 @@
+{
+  "log": {
+    "level": "warn",
+    "timestamp": true
+  },
+  "dns": {
+    "servers": [
+      { "type": "tcp", "tag": "remote-dns", "server": "1.1.1.1", "server_port": 53, "detour": "ss2022" }
+    ],
+    "final": "remote-dns",
+    "strategy": "ipv4_only"
+  },
+  "inbounds": [
+    {
+      "type": "tun",
+      "tag": "tun-in",
+      "interface_name": "tun0",
+      "address": ["10.0.0.2/24"],
+      "mtu": 1400,
+      "stack": "gvisor",
+      "strict_route": true
+    }
+  ],
+  "outbounds": [
+    {
+      "type": "selector",
+      "tag": "proxy",
+      "outbounds": ["auto", "ss2022", "reality-fallback"],
+      "default": "auto"
+    },
+    {
+      "type": "urltest",
+      "tag": "auto",
+      "outbounds": ["ss2022", "reality-fallback"],
+      "url": "https://www.gstatic.com/generate_204",
+      "interval": "30m",
+      "tolerance": 100
+    },
+    {
+      "type": "shadowsocks",
+      "tag": "ss2022",
+      "server": "__SERVER_IP__",
+      "server_port": 443,
+      "method": "2022-blake3-aes-128-gcm",
+      "password": "__SS2022_PASSWORD__",
+      "network": "tcp",
+      "detour": "shadowtls-primary"
+    },
+    {
+      "type": "shadowtls",
+      "tag": "shadowtls-primary",
+      "server": "__SERVER_IP__",
+      "server_port": 443,
+      "version": 3,
+      "password": "__SHADOWTLS_PASSWORD__",
+      "tls": {
+        "enabled": true,
+        "server_name": "__HANDSHAKE_DOMAIN__",
+        "min_version": "1.3",
+        "alpn": ["h2"],
+        "utls": { "enabled": true, "fingerprint": "chrome" }
+      }
+    },
+    {
+      "type": "vless",
+      "tag": "reality-fallback",
+      "server": "__REALITY_IP__",
+      "server_port": 443,
+      "uuid": "__UUID__",
+      "flow": "xtls-rprx-vision",
+      "tls": {
+        "enabled": true,
+        "server_name": "__HANDSHAKE_DOMAIN__",
+        "utls": { "enabled": true, "fingerprint": "chrome" },
+        "reality": {
+          "enabled": true,
+          "public_key": "__REALITY_PUBLIC_KEY__",
+          "short_id": "__REALITY_SHORT_ID__"
+        }
+      }
+    },
+    { "type": "direct", "tag": "direct" },
+    { "type": "block", "tag": "block" }
+  ],
+  "route": {
+    "rules": [
+      { "protocol": "dns", "action": "hijack-dns" },
+      { "ip_is_private": true, "outbound": "direct" }
+    ],
+    "auto_detect_interface": true,
+    "final": "proxy"
+  }
+}

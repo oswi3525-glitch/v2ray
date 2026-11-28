@@ -305,6 +305,14 @@ function migrate() {
       db.exec('COMMIT');
     } catch (e) { db.exec('ROLLBACK'); throw e; }
   }
+  if (!applied.has(9)) {
+    db.exec('BEGIN');
+    try {
+      db.exec('CREATE INDEX IF NOT EXISTS idx_api_tokens_expiry ON api_tokens(refresh_expires_at, access_expires_at)');
+      db.prepare('INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)').run(9, now());
+      db.exec('COMMIT');
+    } catch (e) { db.exec('ROLLBACK'); throw e; }
+  }
   return applied;
 }
 migrate();
@@ -398,9 +406,21 @@ function createFriend({ username, displayName, passwordHash, quotaBytes, expires
   } catch (e) { db.exec('ROLLBACK'); throw e; }
 }
 
+function revokeUserCredentials(userId, role) {
+  const t = now();
+  db.prepare('UPDATE api_tokens SET revoked_at=? WHERE user_id=? AND role=? AND revoked_at IS NULL')
+    .run(t, Number(userId), String(role));
+  db.prepare('DELETE FROM sessions WHERE user_id=? AND role=?').run(Number(userId), String(role));
+}
+
 function setFriendPassword(id, hash) {
-  db.prepare('UPDATE users SET password_hash=? WHERE id=?').run(hash, id);
-  audit('admin', 'friend_password_reset', String(id));
+  db.exec('BEGIN');
+  try {
+    db.prepare('UPDATE users SET password_hash=? WHERE id=?').run(hash, id);
+    revokeUserCredentials(id, 'friend');
+    audit('admin', 'friend_password_reset', String(id));
+    db.exec('COMMIT');
+  } catch (e) { db.exec('ROLLBACK'); throw e; }
 }
 
 function changeQuota(id, action, deltaBytes, quotaBytes, actor) {
@@ -449,6 +469,7 @@ function revokeFriend(id, actor) {
     db.prepare('UPDATE users SET enabled=0, revoked_at=? WHERE id=?').run(now(), id);
     db.prepare('UPDATE subscriptions SET revoked_at=? WHERE user_id=?').run(now(), id);
     db.prepare('UPDATE vpn_clients SET revoked_at=? WHERE user_id=?').run(now(), id);
+    revokeUserCredentials(id, 'friend');
     audit(actor, 'friend_revoked', String(id));
     db.exec('COMMIT');
     return getUser(id);
@@ -576,7 +597,13 @@ function revokeApiTokenById(id) {
 
 function purgeApiTokens() {
   const t = now();
-  db.prepare('DELETE FROM api_tokens WHERE access_expires_at < ? AND refresh_expires_at < ?').run(t, t);
+  const sql = `DELETE FROM api_tokens WHERE rowid IN (
+    SELECT rowid FROM api_tokens WHERE access_expires_at < ? AND refresh_expires_at < ? LIMIT 500
+  )`;
+  let removed;
+  do {
+    removed = db.prepare(sql).run(t, t).changes;
+  } while (removed === 500);
 }
 
 function addResearchRun(r) {

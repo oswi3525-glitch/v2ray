@@ -14,6 +14,7 @@ const { ROOT } = cdb;
 const BASE = `http://127.0.0.1:${cfg.app_port}`;
 const markerSource = 'app-api-test';
 const results = [];
+let cleanupFn = () => {};
 function rec(name, status, detail = '') {
   results.push({ name, status, detail });
   console.log(`${status.padEnd(6)} ${name}${detail ? ' — ' + detail : ''}`);
@@ -46,6 +47,13 @@ async function main() {
   const tokenIdsBefore = new Set(cdb.db.prepare('SELECT id FROM api_tokens').all().map((r) => r.id));
   const usedBefore = cdb.trafficTotals(user.id).total;
   const deviceId = crypto.randomBytes(8).toString('hex');
+  cleanupFn = () => {
+    cdb.db.prepare('DELETE FROM traffic_usage WHERE source=?').run(markerSource);
+    cdb.db.prepare('DELETE FROM devices WHERE id=?').run(deviceId);
+    for (const row of cdb.db.prepare('SELECT id FROM api_tokens').all()) {
+      if (!tokenIdsBefore.has(row.id)) cdb.db.prepare('DELETE FROM api_tokens WHERE id=?').run(row.id);
+    }
+  };
 
   const discovery = await api('/api');
   check('API discovery endpoint works without auth', discovery.status === 200 && discovery.data.api_version === 1);
@@ -54,7 +62,7 @@ async function main() {
   const login = await api('/api/tikfl/login', {
     method: 'POST', body: { username: user.username, password: creds.friend }
   });
-  if (!check('token login succeeds', login.status === 200, `http=${login.status}`)) return finish();
+  if (!check('token login succeeds', login.status === 200, `http=${login.status}`)) { cleanupFn(); return finish(); }
   const token = login.data.token || login.data.access_token;
   const refresh = login.data.refresh_token;
   check('login returns snake_case token fields',
@@ -100,7 +108,7 @@ async function main() {
 
   cdb.recordTraffic(user.id, 4096, 8192, markerSource, undefined, 96);
   const metrics = await api('/api/vpn/metrics', { token });
-  if (!check('VPN metrics endpoint works with bearer', metrics.status === 200 && metrics.data.ok === true)) return finish();
+  if (!check('VPN metrics endpoint works with bearer', metrics.status === 200 && metrics.data.ok === true)) { cleanupFn(); return finish(); }
   check('metrics are labelled server-observed', metrics.data.scope === 'server_observed');
   check('metrics used_bytes includes the injected real DB traffic',
     metrics.data.used_bytes >= usedBefore + 4096 + 8192,
@@ -109,7 +117,7 @@ async function main() {
   check('metrics up/down bitrate is measured over a real window',
     metrics.data.up_bps > 0 && metrics.data.down_bps > 0 && metrics.data.rate_window_ms === 6000,
     `up=${metrics.data.up_bps} down=${metrics.data.down_bps}`);
-  check('metrics rate source is recorded traffic', metrics.data.rate_source === 'traffic_usage');
+  check('metrics rate source is recorded traffic', metrics.data.rate_source === 'traffic_usage+ws-live');
   check('metrics report active only after real traffic', metrics.data.active === true && !!metrics.data.last_traffic_at);
   check('metrics include real session history array', Array.isArray(metrics.data.sessions));
   check('metrics disclose what the server cannot measure',
@@ -130,11 +138,7 @@ async function main() {
   const revoked = await api('/api/auth/me', { token });
   check('logged-out token is rejected', revoked.status === 401);
 
-  cdb.db.prepare('DELETE FROM traffic_usage WHERE source=?').run(markerSource);
-  cdb.db.prepare('DELETE FROM devices WHERE id=?').run(deviceId);
-  for (const row of cdb.db.prepare('SELECT id FROM api_tokens').all()) {
-    if (!tokenIdsBefore.has(row.id)) cdb.db.prepare('DELETE FROM api_tokens WHERE id=?').run(row.id);
-  }
+  cleanupFn();
   finish();
 }
 
@@ -147,4 +151,4 @@ function finish() {
   process.exit(fail ? 1 : 0);
 }
 
-main().catch((e) => { console.error('app API test error:', e.stack); process.exit(2); });
+main().catch((e) => { cleanupFn(); console.error('app API test error:', e.stack); process.exit(2); });

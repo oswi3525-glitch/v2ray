@@ -114,7 +114,7 @@ Trả cấu hình để app tạo NetworkExtension. Ví dụ rút gọn:
   "used_upload": 1234, "used_download": 5678, "used_bytes": 6912,
   "overhead_bytes": 96, "quota_bytes": 1073741824, "remaining_bytes": 1073773312,
   "up_bps": 683, "down_bps": 1365, "total_bps": 2048,
-  "rate_window_ms": 6000, "rate_source": "traffic_usage",
+  "rate_window_ms": 6000, "rate_source": "traffic_usage+ws-live", "live_up_bps": 0, "live_down_bps": 0,
   "sessions": [ { "id": 1, "started_at": "...", "upload_bytes": ..., "status": "..." } ],
   "speedtests": [ ... ],
   "server": { "api_latency_ms": 1.23, "reachable": true, "mode": "tcp" },

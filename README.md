@@ -75,4 +75,4 @@ npm audit --audit-level=low           # 0 vulnerabilities
 
 ## Tài liệu
 
-`APP_API.md` (hợp đồng API cho app iOS), `CONNECTIVITY_AUDIT.md` (báo cáo điều tra lỗi kết nối), `CHANGELOG.md`, `ARCHITECTURE.md`, `SECURITY_AUDIT.md`, `SHADOWROCKET_IMPORT.md`, `NETWORK_TEST.md`, `DEVICE_ACTIVITY.md`, `PERFORMANCE_REPORT.md`, `UI_UX_REPORT.md`, `API.md`, `DATABASE.md`, `INSTALL.md`, `TROUBLESHOOTING.md`, `reports/*`.
+`APP_API.md` (hợp đồng API cho app iOS), `deploy/README.md` (lõi VPN ShadowTLS/Reality + script triển khai), `CONNECTIVITY_AUDIT.md` (báo cáo điều tra lỗi kết nối), `CHANGELOG.md`, `ARCHITECTURE.md`, `SECURITY_AUDIT.md`, `SHADOWROCKET_IMPORT.md`, `NETWORK_TEST.md`, `DEVICE_ACTIVITY.md`, `PERFORMANCE_REPORT.md`, `UI_UX_REPORT.md`, `API.md`, `DATABASE.md`, `INSTALL.md`, `TROUBLESHOOTING.md`, `reports/*`.

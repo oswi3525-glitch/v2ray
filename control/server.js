@@ -57,6 +57,7 @@ const lastTrafficSeen = new Map();
 const speedPrev = new Map();
 const deviceLastTraffic = new Map();
 const loginFailures = new Map();
+const TUN_MTU = 9000;
 
 function cookieMap(req) {
   const out = {};
@@ -66,16 +67,25 @@ function cookieMap(req) {
   }
   return out;
 }
+function clientIp(req) {
+  return String(req.headers['x-tiktunnel-client-ip'] || req.ip || '');
+}
 function bearerToken(req) {
   const h = req.headers.authorization || '';
   return h.startsWith('Bearer ') ? h.slice(7).trim() : '';
+}
+function sessionUsable(s) {
+  if (!s) return false;
+  if (s.role === 'admin') return !!cdb.getAdmin();
+  const u = cdb.getUser(s.user_id);
+  return !!u && !u.revoked_at && u.enabled === 1;
 }
 function sessionFor(req) {
   const token = bearerToken(req);
   if (token) {
     const row = cdb.findApiToken(token);
     if (row) {
-      return {
+      const s = {
         id: `token:${row.id}`,
         token_id: row.id,
         user_id: row.user_id,
@@ -84,10 +94,12 @@ function sessionFor(req) {
         bearer: true,
         expires_in: Math.max(0, Math.floor((Date.parse(row.access_expires_at) - Date.now()) / 1000))
       };
+      return sessionUsable(s) ? s : null;
     }
   }
   const id = cookieMap(req).tiktunnel_session;
-  return id ? cdb.getSession(id) : null;
+  const s = id ? cdb.getSession(id) : null;
+  return s && sessionUsable(s) ? s : null;
 }
 function guard(req, reply, role) {
   const s = sessionFor(req);
@@ -128,7 +140,7 @@ function clearSessionCookie(reply) {
   ]);
 }
 function rateLimited(req, key, limit, windowMs) {
-  const k = `${req.ip}|${key}`;
+  const k = `${clientIp(req)}|${key}`;
   const now = Date.now();
   let b = rateBuckets.get(k);
   if (!b || now >= b.reset) { b = { n: 0, reset: now + windowMs }; rateBuckets.set(k, b); }
@@ -271,13 +283,16 @@ function buildFullTunnelProfile(u, deviceId = null) {
         { type: 'https', tag: 'remote-dns', server: '1.1.1.1', detour: 'proxy' },
         { type: 'local', tag: 'local-dns' }
       ],
+      rules: [
+        { domain: [control.publicTcpHost, control.public_https_host].filter(Boolean), server: 'local-dns' }
+      ],
       final: 'remote-dns'
     },
     inbounds: [
       {
         type: 'tun', tag: 'tun-in',
         address: ['172.19.0.1/30', 'fdfe:dcba:9876::1/126'],
-        mtu: 9000,
+        mtu: TUN_MTU,
         auto_route: true,
         strict_route: true,
         stack: 'system'
@@ -292,7 +307,7 @@ function buildFullTunnelProfile(u, deviceId = null) {
       rules: [{ protocol: 'dns', action: 'hijack-dns' }],
       final: 'proxy',
       auto_detect_interface: true,
-      default_domain_resolver: 'local-dns'
+      default_domain_resolver: 'remote-dns'
     }
   };
   return {
@@ -302,7 +317,7 @@ function buildFullTunnelProfile(u, deviceId = null) {
       applies_to: 'sing-box client (desktop/Android/macOS). iOS system VPN still requires a NetworkExtension app or Shadowrocket.',
       ipv4: 'all IPv4 routed through the VPN outbound',
       ipv6: 'IPv6 is routed into the tunnel; no outside-tunnel IPv6 route is configured',
-      dns: 'DNS resolved through the tunnel (remote-dns detoured to proxy)',
+      dns: 'DNS resolved through the tunnel (remote-dns detoured to proxy); only the proxy hostname is resolved locally',
       udp: 'UDP forwarded via VLESS xudp; TCP via VLESS',
       routing_check: 'verify with a public IP echo after connecting; this file does not guarantee carrier-side behaviour'
     }
@@ -311,7 +326,7 @@ function buildFullTunnelProfile(u, deviceId = null) {
 
 let applyChain = Promise.resolve();
 function applyConfig() {
-  applyChain = applyChain.then(() => new Promise((resolve, reject) => {
+  applyChain = applyChain.catch(() => {}).then(() => new Promise((resolve, reject) => {
     execFile('bash', [path.join(ROOT, 'scripts', 'apply-control-config.sh')], { cwd: ROOT, timeout: 15000 },
       (err) => (err ? reject(new Error('apply_failed')) : resolve()));
   }));
@@ -425,15 +440,15 @@ app.get('/api', async () => ({
 async function handleLogin(req, reply, { withTokens }) {
   const username = typeof req.body?.username === 'string' ? req.body.username.trim() : '';
   const password = typeof req.body?.password === 'string' ? req.body.password : '';
-  const key = `${req.ip}|${username || '-'}`;
+  const key = `${clientIp(req)}|${username || '-'}`;
   const now = Date.now();
   const failures = loginFailures.get(key);
   if (failures && failures.n >= 5 && failures.until > now) {
-    cdb.securityEvent('anonymous', 'login_locked', username, req.ip, `until=${new Date(failures.until).toISOString()}`);
+    cdb.securityEvent('anonymous', 'login_locked', username, clientIp(req), `until=${new Date(failures.until).toISOString()}`);
     return reply.code(429).send({ ok: false, error: 'too_many_attempts' });
   }
   if (rateLimited(req, 'login', 10, 300000)) {
-    cdb.securityEvent('anonymous', 'rate_limited', 'login', req.ip);
+    cdb.securityEvent('anonymous', 'rate_limited', 'login', clientIp(req));
     return reply.code(429).send({ ok: false, error: 'too_many_attempts' });
   }
   if (!username || !password || username.length > 32 || password.length > 200) {
@@ -450,7 +465,7 @@ async function handleLogin(req, reply, { withTokens }) {
     const n = (failures && failures.until <= now ? 0 : (failures?.n || 0)) + 1;
     loginFailures.set(key, { n, until: n >= 5 ? now + 15 * 60e3 : now + 60e3 });
     cdb.audit('anonymous', 'login_failed', username);
-    cdb.securityEvent('anonymous', 'login_failed', username, req.ip, `attempt=${n}`);
+    cdb.securityEvent('anonymous', 'login_failed', username, clientIp(req), `attempt=${n}`);
     return reply.code(401).send({ ok: false, error: 'invalid_credentials' });
   }
   loginFailures.delete(key);
@@ -459,7 +474,7 @@ async function handleLogin(req, reply, { withTokens }) {
   const s = cdb.openSession(user.id, role);
   setSessionCookie(reply, s);
   cdb.audit(role, 'login', username);
-  cdb.securityEvent(role, 'login', username, req.ip);
+  cdb.securityEvent(role, 'login', username, clientIp(req));
   const body = { ok: true, role, csrf: s.csrf };
   if (withTokens) {
     const t = cdb.issueApiTokens(user.id, role);
@@ -505,7 +520,7 @@ app.post('/api/auth/logout', async (req, reply) => {
   if (s.bearer) cdb.revokeApiTokenById(s.token_id);
   else cdb.deleteSession(s.id);
   clearSessionCookie(reply);
-  cdb.securityEvent(s.role, 'logout', String(s.user_id), req.ip);
+  cdb.securityEvent(s.role, 'logout', String(s.user_id), clientIp(req));
   return reply.send({ ok: true });
 });
 
@@ -531,7 +546,7 @@ app.get('/api/diagnostics/run', async (req, reply) => {
   const u = s.role === 'admin' ? (cdb.listUsers().find((x) => !x.revoked_at) || null) : cdb.getUser(s.user_id);
   const checks = await runDiagnostics({ control, user: u, cdb,
     internalHealthUrl: `http://127.0.0.1:${control.internalPort}/health` });
-  cdb.securityEvent(s.role, 'diagnostics_run', String(s.user_id), req.ip);
+  cdb.securityEvent(s.role, 'diagnostics_run', String(s.user_id), clientIp(req));
   return reply.header('Cache-Control', 'no-store').send({ ok: true, checks,
     summary: {
       pass: checks.filter((c) => c.status === 'PASS').length,
@@ -550,7 +565,7 @@ app.get('/api/notifications', async (req, reply) => {
 });
 app.post('/api/notifications/read', async (req, reply) => {
   const s = sessionFor(req);
-  if (!s || req.headers['x-csrf-token'] !== s.csrf) return reply.code(401).send({ ok: false, error: 'unauthorized' });
+  if (!s || !csrfOk(req, { session: s })) return reply.code(401).send({ ok: false, error: 'unauthorized' });
   cdb.markNotificationsRead(s.user_id, s.role, req.body?.id ?? null);
   return reply.send({ ok: true, unread: cdb.unreadCount(s.user_id, s.role) });
 });
@@ -727,7 +742,7 @@ app.post('/api/admin/research/run', async (req, reply) => {
     });
     results.push({ id, label: t.label, ...r });
   }
-  cdb.securityEvent('admin', 'research_run', picked.map((t) => t.id).join(','), req.ip, `targets=${picked.length}`);
+  cdb.securityEvent('admin', 'research_run', picked.map((t) => t.id).join(','), clientIp(req), `targets=${picked.length}`);
   return reply.header('Cache-Control', 'no-store').send({
     ok: true, branch: 't15kn', samples,
     results,
@@ -768,7 +783,7 @@ app.post('/api/admin/research/carrier', async (req, reply) => {
     detail: JSON.stringify({ carrier_used_bytes: Math.round(carrier), server_used_bytes: serverUsed, delta: Math.round(delta), mismatch_pct: mismatchPct }),
     actor: 'admin'
   });
-  cdb.securityEvent('admin', 'carrier_report_added', String(u.id), req.ip, `delta=${Math.round(delta)}`);
+  cdb.securityEvent('admin', 'carrier_report_added', String(u.id), clientIp(req), `delta=${Math.round(delta)}`);
   return reply.code(201).send({
     ok: true,
     id,
@@ -862,8 +877,7 @@ app.get('/api/friend/vpn', async (req, reply) => {
   return reply.send({     ok: true, uri: vlessUri(a.user, req.query.device), experimental_uri: experimentalUri(a.user, req.query.device), experimental_enabled: experimentalEnabled(), mode: control.publicTransport, active: cdb.activeVpnUsers().some((u) => u.id === a.user.id) });
 });
 
-function parseVlessConfig(u, deviceId = null) {
-  const uri = vlessUri(u, deviceId);
+function parseVlessConfig(uri) {
   if (!uri) return null;
   let parsed;
   try { parsed = new URL(uri); } catch { return null; }
@@ -879,7 +893,7 @@ function parseVlessConfig(u, deviceId = null) {
     path: q.get('path') || '',
     flow: q.get('flow') || '',
     name: decodeURIComponent((parsed.hash || '').slice(1) || ''),
-    mtu: 1400
+    mtu: TUN_MTU
   };
 }
 
@@ -888,20 +902,22 @@ app.get('/api/vpn/config', async (req, reply) => {
   const u = cdb.getUser(a.user.id) || a.user;
   const deviceId = cdb.validDeviceId(req.query.device) ? req.query.device : null;
   const ready = accountReady(u);
-  const uri = vlessUri(u, deviceId);
-  const sub = cdb.getSubscription(u.id);
-  const profile = ready ? buildFullTunnelProfile(u, deviceId) : null;
+  const rawUri = vlessUri(u, deviceId);
+  const usable = ready && !!rawUri;
+  const uri = usable ? rawUri : null;
+  const sub = usable ? cdb.getSubscription(u.id) : null;
+  const profile = usable ? buildFullTunnelProfile(u, deviceId) : null;
   reply.header('Cache-Control', 'no-store');
   return reply.send({
     ok: true,
-    ready: ready && !!uri,
+    ready: usable,
     server_ready: processAlive(readPid('sing-box.pid')),
     account_ready: ready,
-    config_ready: !!uri,
+    config_ready: !!rawUri,
     uri,
     subscription_url: sub ? `/api/sub/${sub.token}` : null,
-    experimental_uri: experimentalUri(u, deviceId),
-    config: uri ? parseVlessConfig(u, deviceId) : null,
+    experimental_uri: usable ? experimentalUri(u, deviceId) : null,
+    config: uri ? parseVlessConfig(uri) : null,
     full_tunnel: profile ? profile.config : null,
     profile_meta: profile ? profile.meta : null,
     mode: control.publicTransport
@@ -967,7 +983,9 @@ app.get('/api/vpn/metrics', async (req, reply) => {
     down_bps: stats.down_bps,
     total_bps: stats.total_bps,
     rate_window_ms: stats.rate_window_ms,
-    rate_source: 'traffic_usage',
+    rate_source: stats.rate_source,
+    live_up_bps: stats.live_up_bps,
+    live_down_bps: stats.live_down_bps,
     sessions,
     speedtests: cdb.speedTests(u.id, 5),
     server: {
@@ -984,7 +1002,7 @@ app.get('/api/friend/import', async (req, reply) => {
   const u = cdb.getUser(a.user.id) || a.user;
   const deviceId = cdb.validDeviceId(req.query.device) ? req.query.device : null;
   if (!accountReady(u)) {
-    cdb.securityEvent('friend', 'import_denied', String(u.id), req.ip, 'account_not_ready');
+    cdb.securityEvent('friend', 'import_denied', String(u.id), clientIp(req), 'account_not_ready');
     return reply.code(403).send({ ok: false, error: 'account_not_ready' });
   }
   const s = cdb.getSubscription(u.id);
@@ -997,7 +1015,7 @@ app.get('/api/friend/import', async (req, reply) => {
   const subUrl = `${origin}/api/sub/${s.token}${deviceId && !tcpPublic ? `?device=${deviceId}` : ''}`;
   const remark = String(u.display_name || u.username).replace(/[^\p{L}\p{N} ._-]/gu, '').slice(0, 40) || 'TikTunnel';
   const serverReady = processAlive(readPid('sing-box.pid'));
-  cdb.securityEvent('friend', 'import_link_issued', String(u.id), req.ip, `mode=${control.vpn_mode}`);
+  cdb.securityEvent('friend', 'import_link_issued', String(u.id), clientIp(req), `mode=${control.vpn_mode}`);
   return reply.header('Cache-Control', 'no-store').send({
     ok: true,
     server_ready: serverReady,
@@ -1030,7 +1048,7 @@ function experimentalImportHandler(req, reply) {
   const u = cdb.getUser(a.user.id) || a.user;
   const deviceId = cdb.validDeviceId(req.query.device) ? req.query.device : null;
   if (!accountReady(u)) {
-    cdb.securityEvent('friend', 'experimental_import_denied', String(u.id), req.ip, 'account_not_ready');
+    cdb.securityEvent('friend', 'experimental_import_denied', String(u.id), clientIp(req), 'account_not_ready');
     return reply.code(403).send({ ok: false, error: 'account_not_ready' });
   }
   const cfg = experimentalConfig();
@@ -1044,7 +1062,7 @@ function experimentalImportHandler(req, reply) {
   const subUrl = `${origin}/api/experimental/sub/${s.token}${deviceId ? `?device=${deviceId}` : ''}`;
   const remark = ((u.display_name || u.username) + ' Experimental').replace(/[^\p{L}\p{N} ._-]/gu, '').slice(0, 40);
   const serverReady = true;
-  cdb.securityEvent('friend', 'experimental_import_link_issued', String(u.id), req.ip, `branch=experimental`);
+  cdb.securityEvent('friend', 'experimental_import_link_issued', String(u.id), clientIp(req), `branch=experimental`);
   return reply.header('Cache-Control', 'no-store').send({
     ok: true, branch: 'experimental',
     server_ready: serverReady, account_ready: true, ready: true,
@@ -1296,10 +1314,19 @@ app.post('/api/friend/password', async (req, reply) => {
   const a = guard(req, reply, 'friend'); if (!a || !csrfOk(req, a)) return reply.code(401).send({ ok: false, error: 'unauthorized' });
   if (!validPassword(req.body?.password)) return reply.code(400).send({ ok: false, error: 'invalid_password' });
   cdb.setFriendPassword(a.user.id, bcrypt.hashSync(req.body.password, 12));
-  cdb.securityEvent('friend', 'password_changed', String(a.user.id), req.ip);
+  const fresh = cdb.openSession(a.user.id, 'friend');
+  setSessionCookie(reply, fresh);
+  cdb.securityEvent('friend', 'password_changed', clientIp(req));
   cdb.notify({ userId: a.user.id, role: 'friend', type: 'security',
     title: 'Mật khẩu tài khoản đã đổi', body: 'Nếu không phải bạn, hãy đổi mật khẩu ngay.' });
-  return reply.send({ ok: true });
+  const body = { ok: true };
+  if (a.session.bearer) {
+    const t = cdb.issueApiTokens(a.user.id, 'friend');
+    body.token = t.token;
+    body.refresh_token = t.refresh_token;
+    body.expires_in = t.expires_in;
+  }
+  return reply.send(body);
 });
 
 app.get('/api/friend/devices', async (req, reply) => {
@@ -1346,22 +1373,40 @@ app.get('/api/admin/devices', async (req, reply) => {
 
 const downloadBlock = Buffer.alloc(64 * 1024, 0x5a);
 const downloadCache = new Map();
+const DOWNLOAD_CACHE_MAX = 16 * 1024 * 1024;
+const DOWNLOAD_CACHE_TTL = 60000;
+let downloadCacheBytes = 0;
+let downloadCacheSweep = 0;
 function downloadPayload(n) {
-  let buf = downloadCache.get(n);
-  if (!buf) {
-    buf = Buffer.allocUnsafe(n);
-    for (let i = 0; i < n; i += downloadBlock.length) {
-      downloadBlock.copy(buf, i, 0, Math.min(downloadBlock.length, n - i));
+  const t = Date.now();
+  if (t - downloadCacheSweep > DOWNLOAD_CACHE_TTL) {
+    for (const [size, entry] of downloadCache) {
+      if (t - entry.t > DOWNLOAD_CACHE_TTL) {
+        downloadCache.delete(size);
+        downloadCacheBytes -= entry.buf.length;
+      }
     }
-    if (downloadCache.size >= 12) downloadCache.clear();
-    downloadCache.set(n, buf);
+    downloadCacheSweep = t;
   }
+  const hit = downloadCache.get(n);
+  if (hit && t - hit.t <= DOWNLOAD_CACHE_TTL) return hit.buf;
+  const buf = Buffer.allocUnsafe(n);
+  for (let i = 0; i < n; i += downloadBlock.length) {
+    downloadBlock.copy(buf, i, 0, Math.min(downloadBlock.length, n - i));
+  }
+  if (hit) downloadCacheBytes -= hit.buf.length;
+  if (downloadCacheBytes + n > DOWNLOAD_CACHE_MAX) {
+    downloadCache.clear();
+    downloadCacheBytes = 0;
+  }
+  downloadCache.set(n, { buf, t });
+  downloadCacheBytes += n;
   return buf;
 }
 app.get('/api/net/ping', async (req, reply) => {
   const a = guard(req, reply, 'friend'); if (!a) return;
   if (rateLimited(req, 'ping', 120, 60000)) return reply.code(429).send({ ok: false, error: 'rate_limited' });
-  return reply.header('Cache-Control', 'no-store').send({ ok: true, t: Date.now(), ip: req.ip });
+  return reply.header('Cache-Control', 'no-store').send({ ok: true, t: Date.now(), ip: clientIp(req) });
 });
 app.get('/api/net/download', async (req, reply) => {
   const a = guard(req, reply, 'friend'); if (!a) return;
@@ -1556,14 +1601,16 @@ function liveStats(user) {
   const now = Date.now();
   const prev = speedPrev.get(user.id);
   const dbRates = cdb.trafficRates(user.id, 6000);
-  let upBps = dbRates.up_bps, downBps = dbRates.down_bps;
-  if (dbRates.sampled_bytes === 0 && prev) {
+  let liveUpBps = 0, liveDownBps = 0;
+  if (prev) {
     const dt = (now - prev.t) / 1000;
     if (dt > 0) {
-      upBps = Math.max(0, (live.up - prev.up) / dt);
-      downBps = Math.max(0, (live.down - prev.down) / dt);
+      liveUpBps = Math.max(0, (live.up - prev.up) / dt);
+      liveDownBps = Math.max(0, (live.down - prev.down) / dt);
     }
   }
+  const upBps = dbRates.up_bps + liveUpBps;
+  const downBps = dbRates.down_bps + liveDownBps;
   speedPrev.set(user.id, { t: now, up: live.up, down: live.down });
   const wsLast = lastTrafficSeen.get(user.id) || 0;
   const dbLast = user.last_seen ? Date.parse(user.last_seen) : 0;
@@ -1579,6 +1626,9 @@ function liveStats(user) {
     down_bps: Math.round(downBps),
     total_bps: Math.round(upBps + downBps),
     rate_window_ms: dbRates.window_ms,
+    rate_source: 'traffic_usage+ws-live',
+    live_up_bps: Math.round(liveUpBps),
+    live_down_bps: Math.round(liveDownBps),
     used_upload: usedUpload,
     used_download: usedDownload,
     used_bytes: usedUpload + usedDownload,
@@ -1629,8 +1679,11 @@ app.server.on('upgrade', (req, socket, head) => {
     function finish() {
       if (pair.done) return;
       pair.done = true;
-      activeWs.get(user.id)?.delete(pair);
-      if (activeWs.get(user.id)?.size === 0) activeWs.delete(user.id);
+      const set = activeWs.get(user.id);
+      if (set) {
+        set.delete(pair);
+        if (set.size === 0) activeWs.delete(user.id);
+      }
       cdb.db.prepare('UPDATE connection_sessions SET ts_end=?, upload_bytes=?, download_bytes=?, status=? WHERE id=?')
         .run(cdb.now(), pair.upBytes, pair.downBytes, 'closed', Number(sid));
       cdb.recordTraffic(user.id, pair.upBytes, pair.downBytes, 'ws-proxy');
@@ -1638,6 +1691,11 @@ app.server.on('upgrade', (req, socket, head) => {
         cdb.addDeviceTraffic(deviceId, pair.upBytes - pair.countedUp, pair.downBytes - pair.countedDown);
       }
       bumpLiveTraffic(user.id, -pair.upBytes, -pair.downBytes);
+      if (!activeWs.has(user.id)) {
+        liveTraffic.delete(user.id);
+        lastTrafficSeen.delete(user.id);
+        speedPrev.delete(user.id);
+      }
       try { ws.close(); } catch {}
       try { up.close(); } catch {}
     }
